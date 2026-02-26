@@ -69,19 +69,14 @@ void TonnetzWidget::worldToScreen(float wx, float wy, float& sx, float& sy) {
 void TonnetzWidget::screenToWorld(int sx, int sy, float& wx, float& wy) {
     float cx = w() * 0.5f, cy = h() * 0.5f;
     wx = (sx - cx) / zoom_ - pan_x_;
-    wy = -(sy - cy) / zoom_ + pan_y_;
+    wy = -(sy - cy) / zoom_ - pan_y_;
 }
 
 TonnetzNode* TonnetzWidget::nodeAt(int sx, int sy) {
-    float wx, wy;
-    screenToWorld(sx, sy, wx, wy);
     TonnetzNode* best = nullptr;
-    float bestd = 22.f * zoom_;
+    float bestd = 24.f;
     for (auto& n : nodes_) {
-        // node world position
-        float nx = n.x * node_dx_ + n.y * node_dx_ * 0.5f;
-        float ny = n.y * node_dy_;
-        float d = std::sqrt((wx-nx)*(wx-nx)+(wy-ny)*(wy-ny));
+        float d = std::sqrt((sx - n.cx) * (sx - n.cx) + (sy - n.cy) * (sy - n.cy));
         if (d < bestd) { bestd = d; best = &n; }
     }
     return best;
