@@ -368,9 +368,10 @@ void AudioEngine::identifyChord(AbstractObject& obj) {
         if (std::find(pcs.begin(), pcs.end(), v.pitch_class) == pcs.end())
             pcs.push_back(v.pitch_class);
     }
-    if (pcs.empty()) { obj.chord_name = "—"; obj.confidence = 0.f; return; }
+    if (pcs.empty()) { obj.chord_name = "—"; obj.quality = ""; obj.confidence = 0.f; return; }
     if (pcs.size() == 1) {
         obj.chord_name = std::string(NOTE_NAMES[pcs[0]]);
+        obj.quality = "maj";
         obj.root_pc = pcs[0]; obj.confidence = 1.f; return;
     }
 
@@ -400,8 +401,13 @@ void AudioEngine::identifyChord(AbstractObject& obj) {
 
     obj.root_pc = best_root;
     obj.confidence = best_score;
-    if (best_tpl) obj.chord_name = std::string(NOTE_NAMES[best_root]) + best_tpl->name;
-    else           obj.chord_name = std::string(NOTE_NAMES[best_root]) + "?";
+    if (best_tpl) {
+        obj.chord_name = std::string(NOTE_NAMES[best_root]) + best_tpl->name;
+        obj.quality = best_tpl->name;
+    } else {
+        obj.chord_name = std::string(NOTE_NAMES[best_root]) + "?";
+        obj.quality = "maj";
+    }
 
     // Tonnetz centroid
     int sx = 0, sy = 0;

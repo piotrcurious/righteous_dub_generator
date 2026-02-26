@@ -946,12 +946,19 @@ def main():
         line = line.strip()
         if not line: continue
         try:
-            result = handle(json.loads(line))
+            req = json.loads(line)
+            tag = req.get("tag")
+            result = handle(req)
+            if tag:
+                result["tag"] = tag
             print(json.dumps(result), flush=True)
         except Exception as e:
             import traceback
             sys.stderr.write(traceback.format_exc())
-            print(json.dumps({"result":"error","message":str(e)}), flush=True)
+            err_resp = {"result":"error","message":str(e)}
+            if 'req' in locals() and req.get("tag"):
+                err_resp["tag"] = req.get("tag")
+            print(json.dumps(err_resp), flush=True)
 
 if __name__ == "__main__":
     main()

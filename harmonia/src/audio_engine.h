@@ -39,6 +39,7 @@ struct RoughnessRecord {
 // ── Abstract object: a perceptual gestalt across voices
 struct AbstractObject {
     std::string chord_name;       // e.g. "Cmaj7", "G7", "Am"
+    std::string quality;          // e.g. "maj", "min"
     int         root_pc;          // 0-11
     float       confidence;       // 0-1
     float       roughness_total;  // aggregate

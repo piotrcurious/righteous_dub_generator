@@ -254,6 +254,10 @@ private:
     static void cbSuggestCompletion(Fl_Widget*, void* d);
     static void cbAnalyseEDO(Fl_Widget*, void* d);
 
+    // Browser callbacks
+    static void cbBrowserResolutions(Fl_Widget* w, void* d);
+    static void cbBrowserCompletion(Fl_Widget* w, void* d);
+
     // Voice strip callbacks
     static void cbVoiceOn(Fl_Widget* w, void* d);
     static void cbVoiceAmp(Fl_Widget* w, void* d);
@@ -499,6 +503,8 @@ void HarmoniaApp::setupCallbacks() {
     sl_master_->callback(cbMasterVol, this);
     ch_key_->callback(cbKey, this);
     sp_edo_->callback(cbEDO, this);
+    browser_resolutions_->callback(cbBrowserResolutions, this);
+    browser_completion_->callback(cbBrowserCompletion, this);
     tonnetz_->setNodeClickCallback([this](int pc, int tx, int ty){
         onTonnetzClick(pc, tx, ty);
     });
@@ -514,15 +520,13 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
     static const int STRIP_H = 76;
     int sw = VOICE_PANEL_W - 12;
 
-    // Compute y inside scroll
-    int yrel = 0;
-    for (auto& unused_s : strips_) { (void)unused_s; yrel += STRIP_H + 3; }
-
     scroll_voices_->begin();
     VoiceStrip* strip = new VoiceStrip();
     strip->voice_id = id;
 
-    int gx = 4, gy = scroll_voices_->y() + yrel + 4;
+    // Initial position doesn't matter much as relayoutStrips() will fix it
+    int gx = scroll_voices_->x() + 4;
+    int gy = scroll_voices_->y() + 4;
     strip->group = new Fl_Group(gx, gy, sw, STRIP_H);
     strip->group->box(FL_FLAT_BOX);
     strip->group->color(fl_rgb_color(28,32,44));
@@ -620,8 +624,7 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
     }
 
     strips_.push_back(strip);
-    scroll_voices_->init_sizes();
-    scroll_voices_->redraw();
+    relayoutStrips();
     win_->redraw();
 }
 
@@ -652,6 +655,12 @@ void HarmoniaApp::removeVoice(int voice_id) {
 
 void HarmoniaApp::relayoutStrips() {
     static const int STRIP_H = 76;
+    // Save scroll position
+    int sx = scroll_voices_->xposition();
+    int sy = scroll_voices_->yposition();
+    // Reset scroll to 0 to position widgets correctly in absolute coordinates
+    scroll_voices_->scroll_to(0, 0);
+
     int y = scroll_voices_->y() + 4;
     for (auto* s : strips_) {
         // Use position() not resize() — resize cascades to children and can
@@ -661,6 +670,8 @@ void HarmoniaApp::relayoutStrips() {
     }
     // Recompute the scroll's virtual canvas so it knows the new total height.
     scroll_voices_->init_sizes();
+    // Restore scroll position
+    scroll_voices_->scroll_to(sx, sy);
     scroll_voices_->redraw();
 }
 
@@ -752,13 +763,16 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
     last_clicked_root_ = pitch_class;
     auto voices = audio_->getVoiceSnapshot();
 
-    bool found = false;
+    int existing_id = -1;
     for (auto& v : voices) {
-        if (v.active && v.pitch_class == pitch_class) {
-            audio_->noteOff(v.id); found = true; break;
+        if (v.pitch_class == pitch_class) {
+            existing_id = v.id; break;
         }
     }
-    if (!found) {
+
+    if (existing_id != -1) {
+        removeVoice(existing_id);
+    } else {
         addVoice(midi);
         if (!strips_.empty()) {
             int newid = strips_.back()->voice_id;
@@ -846,7 +860,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     }
     pcs_json += "]";
     theory_->queryRaw(
-        "{\"cmd\":\"analyze_chord\",\"pcs\":" + pcs_json +
+        "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord_icv\",\"pcs\":" + pcs_json +
         ",\"key\":" + std::to_string(current_key_) + "}",
         "analyze_chord_icv",  // separate tag so it doesn't conflict
         [this](const std::string& resp) {
@@ -873,7 +887,8 @@ void HarmoniaApp::updateResolutionPaths() {
     auto obj = audio_->getAbstractObject();
     if (obj.root_pc < 0 && last_clicked_root_ < 0) return;
     int root = last_clicked_root_ >= 0 ? last_clicked_root_ : obj.root_pc;
-    std::string qual = "maj";  // default; ideally from identified chord
+    std::string qual = obj.quality;
+    if (qual == "" || qual == "?") qual = "maj";
 
     theory_->queryResolutionPaths(root, qual, current_key_,
         [this](const std::vector<ResolutionPath>& paths) {
@@ -881,6 +896,7 @@ void HarmoniaApp::updateResolutionPaths() {
             browser_resolutions_->clear();
 
             // Build Tonnetz progression path for visualization
+            int path_idx = 0;
             for (auto& rp : paths) {
                 char buf[256];
                 // Rule class badge
@@ -893,6 +909,7 @@ void HarmoniaApp::updateResolutionPaths() {
                          rp.voice_leading.smoothness.c_str(),
                          rp.voice_leading.distance);
                 browser_resolutions_->add(buf);
+                browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
 
                 // Explanation (word-wrapped)
                 std::string ex = rp.explanation;
@@ -905,8 +922,10 @@ void HarmoniaApp::updateResolutionPaths() {
                     snprintf(buf,sizeof(buf),"   %s->%s (%+d)",
                              m.from_name.c_str(), m.to_name.c_str(), m.semitones);
                     browser_resolutions_->add(buf);
+                    browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
                 }
                 browser_resolutions_->add(" ");
+                path_idx++;
             }
             browser_resolutions_->redraw();
         });
@@ -930,9 +949,12 @@ void HarmoniaApp::updateCompletionSuggestions() {
                          s.roughness_delta,
                          s.in_key ? "(diatonic)" : "(chromatic)");
                 browser_completion_->add(buf);
+                browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
+
                 // Structural reasons
                 for (auto& r : s.structural_reasons) {
                     browser_completion_->add(("   " + r).c_str());
+                    browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
                 }
                 if (!s.structural_reasons.empty())
                     browser_completion_->add(" ");
@@ -1024,6 +1046,52 @@ void HarmoniaApp::cbSuggestCompletion(Fl_Widget*, void* d) {
 
 void HarmoniaApp::cbAnalyseEDO(Fl_Widget*, void* d) {
     ((HarmoniaApp*)d)->updateEDOAnalysis();
+}
+
+void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) return;
+
+    int path_idx = (int)(intptr_t)b->data(line);
+    if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) return;
+
+    const auto& rp = app->last_resolutions_[path_idx];
+    // Highlight nodes for the target chord
+    std::vector<std::pair<int,int>> tpath;
+    // We don't have easy access to gx,gy for all target pcs here without another query,
+    // but we can at least show the target root on Tonnetz if we had a way.
+    // For now, let's just add the target voices if double-clicked?
+    // Actually, let's just add the target chord voices!
+    if (Fl::event_clicks()) {
+        for (int pc : rp.target_pcs) {
+            // Add voice if not present
+            bool present = false;
+            auto voices = app->audio_->getVoiceSnapshot();
+            for (auto& v : voices) if (v.pitch_class == pc) { present = true; break; }
+            if (!present) {
+                int midi = 60 + ((pc - 60%12 + 12) % 12);
+                app->addVoice(midi);
+                int newid = app->strips_.back()->voice_id;
+                app->audio_->noteOn(newid);
+            }
+        }
+    }
+}
+
+void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) return;
+
+    int pc = (int)(intptr_t)b->data(line);
+    if (pc < 0) return;
+
+    if (Fl::event_clicks()) {
+        app->onTonnetzClick(pc, 0, 0);
+    }
 }
 
 void HarmoniaApp::cbVoiceOn(Fl_Widget* w, void* d) {

@@ -186,6 +186,7 @@ void TonnetzWidget::draw() {
 
     drawTriads();
     drawEdges();
+    drawRoughnessHeat();
     drawAbstractObject();
     drawProgressionPath();
     drawNodes();
@@ -364,6 +365,33 @@ void TonnetzWidget::drawLabels() {
 
         int tw = (int)gl_width(n.label.c_str());
         gl_draw(n.label.c_str(), (int)n.cx - tw/2, (int)n.cy + 4);
+    }
+}
+
+void TonnetzWidget::drawRoughnessHeat() {
+    for (const auto& r : roughness_) {
+        if (r.roughness < 0.01f) continue;
+
+        const Voice *va = nullptr, *vb = nullptr;
+        for (const auto& v : voices_) {
+            if (v.id == r.voice_a) va = &v;
+            if (v.id == r.voice_b) vb = &v;
+        }
+        if (!va || !vb) continue;
+
+        // Get world positions
+        float wax = va->tonnetz_x * node_dx_ + va->tonnetz_y * node_dx_ * 0.5f;
+        float way = va->tonnetz_y * node_dy_;
+        float wbx = vb->tonnetz_x * node_dx_ + vb->tonnetz_y * node_dx_ * 0.5f;
+        float wby = vb->tonnetz_y * node_dy_;
+
+        float sax, say, sbx, sby;
+        worldToScreen(wax, way, sax, say);
+        worldToScreen(wbx, wby, sbx, sby);
+
+        // Draw glowing edge for roughness
+        float intensity = std::min(1.0f, r.roughness * 2.0f);
+        drawLine(sax, say, sbx, sby, 1.0f, 0.4f, 0.2f, 1.0f + intensity * 6.0f);
     }
 }
 
