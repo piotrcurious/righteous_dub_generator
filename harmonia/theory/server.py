@@ -17,12 +17,11 @@ Theoretical foundations:
 import sys, json, math, itertools
 from typing import List, Dict, Tuple, Optional, Set, FrozenSet
 
-NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
-NOTE_NAMES_b = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
+NOTE_NAMES = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B']
 
-def nn(pc:int, prefer_flat=False, edo:int=12) -> str:
+def nn(pc:int, prefer_flat=True, edo:int=12) -> str:
     if edo == 12:
-        return (NOTE_NAMES_b if prefer_flat else NOTE_NAMES)[pc % 12]
+        return NOTE_NAMES[pc % 12]
     return f"[{pc}]"
 
 

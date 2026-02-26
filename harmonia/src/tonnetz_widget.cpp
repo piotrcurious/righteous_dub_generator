@@ -344,6 +344,11 @@ void TonnetzWidget::drawNodes() {
             drawFilledCircle(n.cx, n.cy, 20.f, vr*.3f,vg*.3f,vb*.3f, 0.5f);
             drawFilledCircle(n.cx, n.cy, 18.f, vr,vg,vb, 1.f);
             drawRing(n.cx, n.cy, 22.f, 2.f, 1.f,1.f,1.f, 0.7f);
+        } else if (n.pitch_class == highlighted_pc_) {
+            // Highlighted but inactive
+            drawFilledCircle(n.cx, n.cy, 20.f, 1.0f, 1.0f, 0.4f, 0.4f);
+            drawFilledCircle(n.cx, n.cy, 16.f, 1.0f, 1.0f, 0.6f, 0.8f);
+            drawRing(n.cx, n.cy, 22.f, 2.f, 1.0f, 1.0f, 0.0f, 0.8f);
         } else {
             // Inactive: dark node
             drawFilledCircle(n.cx, n.cy, 16.f, pr*.15f,pg*.15f,pb*.15f, 1.f);

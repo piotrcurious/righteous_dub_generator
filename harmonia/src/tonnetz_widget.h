@@ -52,6 +52,8 @@ public:
         progression_path_ = path; redraw();
     }
 
+    void setHighlightedPC(int pc) { highlighted_pc_ = pc; redraw(); }
+
     void draw() override;
     int  handle(int event) override;
 
@@ -67,6 +69,7 @@ private:
     AbstractObject            abs_obj_;
     std::vector<RoughnessRecord> roughness_;
     std::vector<std::pair<int,int>> progression_path_;
+    int highlighted_pc_{-1};
 
     // ── camera
     float pan_x_{0.f}, pan_y_{0.f};
