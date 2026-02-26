@@ -79,7 +79,7 @@ public:
     SpectrumSnapshot getSpectrumSnapshot() const;
 
     // ── settings
-    void setEDO(int edo) { edo_.store(edo); }
+    void setEDO(int edo);
     int  getEDO() const { return edo_.load(); }
 
     // ── master

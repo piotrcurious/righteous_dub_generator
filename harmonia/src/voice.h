@@ -63,6 +63,26 @@ struct Voice {
     int tonnetz_x{0};   // fifths axis (×3/2)
     int tonnetz_y{0};   // thirds axis (×5/4)
 
+    static void pcColorHSV(int pc, int edo_val, float& r, float& g, float& b) {
+        r = g = b = 1.0f;
+        if (edo_val <= 0) return;
+        float h = (float)(pc % edo_val) / edo_val;
+        float s = 0.75f, v = 0.95f;
+        int i = (int)(h * 6);
+        float f = h * 6 - i;
+        float p = v * (1 - s);
+        float q = v * (1 - f * s);
+        float t = v * (1 - (1 - f) * s);
+        switch (i % 6) {
+            case 0: r = v; g = t; b = p; break;
+            case 1: r = q; g = v; b = p; break;
+            case 2: r = p; g = v; b = t; break;
+            case 3: r = p; g = q; b = v; break;
+            case 4: r = t; g = p; b = v; break;
+            case 5: r = v; g = p; b = q; break;
+        }
+    }
+
     // ── display
     float color[3]{0.5f, 0.7f, 1.0f};   // RGB for UI
 

@@ -103,14 +103,7 @@ int AudioEngine::addVoice(int midi_note, TimbrePreset timbre) {
     v.env_stage = Voice::EnvStage::IDLE;
     v.env_value = 0.f;
     // assign a colour by pitch class
-    static const float PC_COLORS[12][3] = {
-        {1,.3,.3},{1,.5,.2},{1,.8,.2},{.7,1,.2},{.3,1,.3},{.2,.9,.5},
-        {.2,.8,.9},{.3,.5,1},{.5,.3,1},{.8,.3,1},{1,.2,.8},{1,.2,.5}
-    };
-    int pc = midi_note % 12;
-    v.color[0] = PC_COLORS[pc][0];
-    v.color[1] = PC_COLORS[pc][1];
-    v.color[2] = PC_COLORS[pc][2];
+    Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
     voices_.push_back(std::move(v));
     return voices_.back().id;
 }
@@ -162,6 +155,7 @@ void AudioEngine::setVoiceDetune(int voice_id, float cents) {
         v.detune_cents = cents;
         v.edo = edo_.load();
         v.setFrequency(v.frequency);
+        Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
         break;
     }
 }
@@ -184,6 +178,16 @@ AbstractObject AudioEngine::getAbstractObject() const {
 SpectrumSnapshot AudioEngine::getSpectrumSnapshot() const {
     std::lock_guard<std::mutex> lk(results_mutex_);
     return spectrum_snap_;
+}
+
+void AudioEngine::setEDO(int edo) {
+    edo_.store(edo);
+    std::lock_guard<std::mutex> lk(voices_mutex_);
+    for (auto& v : voices_) {
+        v.edo = edo;
+        v.setFrequency(v.frequency); // re-calculate pitch_class
+        Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -363,6 +367,7 @@ void AudioEngine::computeVirtualPitch(AbstractObject& obj) {
 //  Chord identification by pitch-class set matching
 // ────────────────────────────────────────────────────────────────────────────
 void AudioEngine::identifyChord(AbstractObject& obj) {
+    int edo = edo_.load();
     // Collect active pitch classes
     std::vector<int> pcs;
     for (auto& v : voices_) {
@@ -371,8 +376,14 @@ void AudioEngine::identifyChord(AbstractObject& obj) {
             pcs.push_back(v.pitch_class);
     }
     if (pcs.empty()) { obj.chord_name = "—"; obj.quality = ""; obj.confidence = 0.f; return; }
+
+    auto get_pc_name = [&](int pc) {
+        if (edo == 12) return std::string(NOTE_NAMES[pc % 12]);
+        return std::to_string(pc);
+    };
+
     if (pcs.size() == 1) {
-        obj.chord_name = std::string(NOTE_NAMES[pcs[0]]);
+        obj.chord_name = get_pc_name(pcs[0]);
         obj.quality = "maj";
         obj.root_pc = pcs[0]; obj.confidence = 1.f; return;
     }
@@ -382,32 +393,34 @@ void AudioEngine::identifyChord(AbstractObject& obj) {
     int best_root = pcs[0];
     const ChordTemplate* best_tpl = nullptr;
 
+    // Template matching only makes sense for 12-EDO or if we scale intervals
     for (int root : pcs) {
         // intervals relative to this root
         std::vector<int> intervals;
-        for (int pc : pcs) if (pc != root) intervals.push_back(((pc - root) + 12) % 12);
+        for (int pc : pcs) if (pc != root) intervals.push_back(((pc - root) + edo) % edo);
         std::sort(intervals.begin(), intervals.end());
 
-        for (auto& tpl : CHORD_TEMPLATES) {
-            // count matching intervals
-            int matches = 0;
-            for (int iv : tpl.intervals)
-                if (std::find(intervals.begin(), intervals.end(), iv % 12) != intervals.end())
-                    matches++;
-            float score = (float)matches / std::max((int)tpl.intervals.size(), (int)intervals.size());
-            if (score > best_score) {
-                best_score = score; best_root = root; best_tpl = &tpl;
+        if (edo == 12) {
+            for (auto& tpl : CHORD_TEMPLATES) {
+                int matches = 0;
+                for (int iv : tpl.intervals)
+                    if (std::find(intervals.begin(), intervals.end(), iv % 12) != intervals.end())
+                        matches++;
+                float score = (float)matches / std::max((int)tpl.intervals.size(), (int)intervals.size());
+                if (score > best_score) {
+                    best_score = score; best_root = root; best_tpl = &tpl;
+                }
             }
         }
     }
 
     obj.root_pc = best_root;
     obj.confidence = best_score;
-    if (best_tpl) {
-        obj.chord_name = std::string(NOTE_NAMES[best_root]) + best_tpl->name;
+    if (best_tpl && edo == 12) {
+        obj.chord_name = get_pc_name(best_root) + best_tpl->name;
         obj.quality = best_tpl->name;
     } else {
-        obj.chord_name = std::string(NOTE_NAMES[best_root]) + "?";
+        obj.chord_name = get_pc_name(best_root) + (edo == 12 ? "?" : "");
         obj.quality = "maj";
     }
 

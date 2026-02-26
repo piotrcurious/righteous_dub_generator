@@ -8,17 +8,6 @@
 #include <cstring>
 #include <algorithm>
 
-// ────────────────────────────────────────────────────────────────────────────
-//  Pitch class → RGB colour (hue wheel by semitone)
-// ────────────────────────────────────────────────────────────────────────────
-static void pcColor(int pc, float& r, float& g, float& b) {
-    static const float COLS[12][3] = {
-        {1.0f,.35f,.35f}, {1.0f,.55f,.20f}, {1.0f,.85f,.15f}, {.75f,1.0f,.20f},
-        {.30f,1.0f,.30f}, {.20f,.95f,.55f}, {.15f,.85f,.95f}, {.20f,.50f,1.0f},
-        {.50f,.25f,1.0f}, {.80f,.20f,1.0f}, {1.0f,.20f,.80f}, {1.0f,.20f,.50f}
-    };
-    r = COLS[pc][0]; g = COLS[pc][1]; b = COLS[pc][2];
-}
 
 static const char* NOTE_NAMES_FLAT[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
@@ -262,13 +251,13 @@ void TonnetzWidget::drawTriads() {
 
             bool maj_lit = voiceActive(a->pitch_class) && voiceActive(b->pitch_class) && voiceActive(c->pitch_class);
             float alpha = maj_lit ? 0.55f : 0.08f;
-            float pr,pg,pb; pcColor(a->pitch_class, pr,pg,pb);
+            float pr,pg,pb; Voice::pcColorHSV(a->pitch_class, edo_, pr,pg,pb);
             drawTriangle(a->cx,a->cy, b->cx,b->cy, c->cx,c->cy, pr,pg,pb, alpha);
 
             if (!d) continue;
             bool min_lit = voiceActive(b->pitch_class) && voiceActive(c->pitch_class) && voiceActive(d->pitch_class);
             alpha = min_lit ? 0.45f : 0.06f;
-            pcColor(c->pitch_class, pr,pg,pb);
+            Voice::pcColorHSV(c->pitch_class, edo_, pr,pg,pb);
             drawTriangle(b->cx,b->cy, c->cx,c->cy, d->cx,d->cy, pr*0.6f,pg*0.6f,pb*0.6f, alpha);
         }
     }
@@ -348,7 +337,7 @@ void TonnetzWidget::drawNodes() {
         }
 
         float pr,pg,pb;
-        pcColor(n.pitch_class, pr,pg,pb);
+        Voice::pcColorHSV(n.pitch_class, edo_, pr,pg,pb);
 
         if (has_voice) {
             // Active voice: bright node with glow

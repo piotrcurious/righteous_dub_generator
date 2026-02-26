@@ -20,8 +20,10 @@ from typing import List, Dict, Tuple, Optional, Set, FrozenSet
 NOTE_NAMES   = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
 NOTE_NAMES_b = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
 
-def nn(pc:int, prefer_flat=False) -> str:
-    return (NOTE_NAMES_b if prefer_flat else NOTE_NAMES)[pc % 12]
+def nn(pc:int, prefer_flat=False, edo:int=12) -> str:
+    if edo == 12:
+        return (NOTE_NAMES_b if prefer_flat else NOTE_NAMES)[pc % 12]
+    return f"[{pc}]"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -330,13 +332,20 @@ def tritone_of_key(key: int) -> Tuple[int,int]:
     """
     return ((key + 11) % 12, (key + 5) % 12)
 
-def functional_analysis(pcs: List[int], key: int) -> Dict:
+def functional_analysis(pcs: List[int], key: int, edo: int = 12) -> Dict:
     """
     Determine harmonic function from algebraic structure alone.
     Every statement is derivable, not statistical.
     """
-    pcs_set  = set(p % 12 for p in pcs)
-    diatonic = set(diatonic_set(key))
+    pcs_set  = set(p % edo for p in pcs)
+    # Scale diatonic set to EDO if not 12
+    if edo == 12:
+        diatonic = set(diatonic_set(key))
+    else:
+        # Simple heuristic for other EDOs: just use scaled major scale steps
+        major_steps = [0, 2, 4, 5, 7, 9, 11]
+        scaled_steps = [round(s * edo / 12) for s in major_steps]
+        diatonic = set((key + s) % edo for s in scaled_steps)
     lt, sd   = tritone_of_key(key)      # leading-tone (7th), subdominant (4th)
     tonic    = key % 12
     dom_root = (key + 7) % 12
@@ -357,7 +366,7 @@ def functional_analysis(pcs: List[int], key: int) -> Dict:
     ]
 
     # ── Functional determination by algebraic rule
-    if has_tritone:
+    if has_tritone and edo == 12:
         function = "DOMINANT"
         function_reason = (
             f"Contains the diatonic tritone [{nn(lt)},{nn(sd)}] (7 and 4 above {nn(key)}). "
@@ -510,14 +519,14 @@ def orbifold_voice_leading(chord_a: List[int], chord_b: List[int]) -> Dict:
         "description": f"Min. {best_d} semitone{'s' if best_d!=1 else ''} — {smoothness}",
     }
 
-def resolution_paths(root: int, quality: str, key: int) -> List[Dict]:
+def resolution_paths(root: int, quality: str, key: int, edo: int = 12) -> List[Dict]:
     """
     Enumerate ALL structurally valid resolutions, each with its algebraic justification.
     These are not probabilities — they are derived from containment, interval structure,
     and minimal voice-leading geometry.
     """
     pcs  = triad_pcs(root, quality)
-    func = functional_analysis(pcs, key)
+    func = functional_analysis(pcs, key, edo)
     results = []
 
     # ── Rule 1: Tritone resolution (if dominant function)
@@ -626,37 +635,43 @@ def resolution_paths(root: int, quality: str, key: int) -> List[Dict]:
 #  MODULE 5 — TONNETZ TENSION AS GEOMETRIC DISTANCE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def tonnetz_projection_interval(pc: int) -> Tuple[int,int]:
+def tonnetz_projection_interval(pc: int, edo: int = 12) -> Tuple[int,int]:
     """Map pitch class to (fifths, thirds) lattice coordinates."""
+    fifth_steps = round(math.log2(1.5) * edo)
+    third_steps = round(math.log2(1.25) * edo)
     best = (0, 0); best_d = 999.0
-    for a in range(-6, 7):
-        for b in range(-4, 5):
-            if (a*7 + b*4) % 12 == pc % 12:
+    # Search a reasonable range around the origin
+    for a in range(-8, 9):
+        for b in range(-6, 7):
+            if (a*fifth_steps + b*third_steps) % edo == pc % edo:
                 d = abs(a) + abs(b)*1.4
                 if d < best_d: best_d = d; best = (a, b)
     return best
 
 # Keep old name for compat
-def tonnetz_projection(iv: int) -> Tuple[int,int]:
-    return tonnetz_projection_interval(iv)
+def tonnetz_projection(iv: int, edo: int = 12) -> Tuple[int,int]:
+    return tonnetz_projection_interval(iv, edo)
 
-def tonic_region_centroid(key: int) -> Tuple[float, float]:
+def tonic_region_centroid(key: int, edo: int = 12) -> Tuple[float, float]:
     """Centroid of the tonic region: I, vi, iii in the Tonnetz."""
-    region_roots = [key%12, (key+9)%12, (key+4)%12]
-    xs = [tonnetz_projection_interval(r)[0] for r in region_roots]
-    ys = [tonnetz_projection_interval(r)[1] for r in region_roots]
+    # Scale intervals to EDO
+    vi_steps = round(9 * edo / 12)
+    iii_steps = round(4 * edo / 12)
+    region_roots = [key % edo, (key + vi_steps) % edo, (key + iii_steps) % edo]
+    xs = [tonnetz_projection_interval(r, edo)[0] for r in region_roots]
+    ys = [tonnetz_projection_interval(r, edo)[1] for r in region_roots]
     return sum(xs)/3.0, sum(ys)/3.0
 
-def tonnetz_tension(pcs: List[int], key: int) -> Dict:
+def tonnetz_tension(pcs: List[int], key: int, edo: int = 12) -> Dict:
     if not pcs:
         return {"tension": 0.0, "tension_label": "rest", "distance": 0.0,
                 "chord_centroid": [0.0,0.0], "tonic_centroid": [0.0,0.0]}
     cx = cy = 0.0
     for pc in pcs:
-        x, y = tonnetz_projection_interval(pc)
+        x, y = tonnetz_projection_interval(pc, edo)
         cx += x; cy += y
     cx /= len(pcs); cy /= len(pcs)
-    tcx, tcy = tonic_region_centroid(key)
+    tcx, tcy = tonic_region_centroid(key, edo)
     dist = math.sqrt((cx-tcx)**2 + (cy-tcy)**2)
     norm = min(1.0, dist / 4.0)
     label = ("at rest" if norm < 0.15 else "mild" if norm < 0.35 else
@@ -807,9 +822,13 @@ INTERVAL_ROUGHNESS = {
     6:0.55,7:0.05,8:0.15,9:0.13,10:0.25,11:0.30,
 }
 
-def suggest_completion(pitch_classes: List[int], key: int) -> List[Dict]:
-    existing = set(p%12 for p in pitch_classes)
-    diat     = set(diatonic_set(key))
+def suggest_completion(pitch_classes: List[int], key: int, edo: int = 12) -> List[Dict]:
+    existing = set(p % edo for p in pitch_classes)
+    if edo == 12:
+        diat = set(diatonic_set(key))
+    else:
+        major_steps = [0, 2, 4, 5, 7, 9, 11]
+        diat = set((key + round(s * edo / 12)) % edo for s in major_steps)
     ji_map   = {0:0.0,2:203.9,4:386.3,5:498.0,7:702.0,9:884.4,11:1088.3,
                 3:315.6,6:590.2,8:813.7,10:969.0,1:111.7}
 
@@ -822,8 +841,8 @@ def suggest_completion(pitch_classes: List[int], key: int) -> List[Dict]:
 
         test_list = sorted(existing | {pc})
         triad_id  = identify_triad(test_list)
-        fa        = functional_analysis(test_list, key)
-        tension   = tonnetz_tension(test_list, key)
+        fa        = functional_analysis(test_list, key, edo)
+        tension   = tonnetz_tension(test_list, key, edo)
 
         reasons = []
         if triad_id:
@@ -871,11 +890,13 @@ def handle(cmd: Dict) -> Dict:
         root = cmd.get("root", pcs[0] if pcs else 0)
         qual = cmd.get("quality","maj")
         key  = cmd.get("key",0)
+        edo  = cmd.get("edo", 12)
         if not pcs: pcs = triad_pcs(root, qual)
-        return {"result":"analyze_chord",
-                "set_class":  set_class_info(pcs),
-                "function":   functional_analysis(pcs, key),
-                "tension":    tonnetz_tension(pcs, key)}
+        res = {"result":"analyze_chord"}
+        res.update(set_class_info(pcs))
+        res.update(functional_analysis(pcs, key, edo))
+        res.update(tonnetz_tension(pcs, key, edo))
+        return res
 
     elif c == "plr_transform":
         return {"result":"plr_transform",
@@ -894,14 +915,16 @@ def handle(cmd: Dict) -> Dict:
                 "reachable": path is not None}
 
     elif c == "resolution_paths":
+        edo = cmd.get("edo", 12)
         return {"result":"resolution_paths",
                 "paths": resolution_paths(cmd.get("root",0), cmd.get("quality","maj"),
-                                          cmd.get("key",0))}
+                                          cmd.get("key",0), edo)}
 
     elif c == "suggest_completion":
+        edo = cmd.get("edo", 12)
         return {"result":"suggest_completion",
                 "suggestions": suggest_completion(cmd.get("pitch_classes",[]),
-                                                  cmd.get("key",0))}
+                                                  cmd.get("key",0), edo)}
 
     elif c == "orbifold_distance":
         vl = orbifold_voice_leading(cmd.get("chord_a",[]), cmd.get("chord_b",[]))
@@ -917,7 +940,7 @@ def handle(cmd: Dict) -> Dict:
 
     elif c == "tonnetz_tension":
         return {"result":"tonnetz_tension",
-                **tonnetz_tension(cmd.get("pcs",[]), cmd.get("key",0))}
+                **tonnetz_tension(cmd.get("pcs",[]), cmd.get("key",0), cmd.get("edo", 12))}
 
     elif c == "ji_lattice":
         num,den,cents = ji_ratio(cmd.get("fifths",0),cmd.get("thirds",0),

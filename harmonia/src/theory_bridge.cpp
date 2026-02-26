@@ -98,13 +98,13 @@ std::string TheoryBridge::sendSync(const std::string& json, int timeout_ms) {
 // ────────────────────────────────────────────────────────────────────────────
 //  Public structural queries
 // ────────────────────────────────────────────────────────────────────────────
-void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key,
+void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int edo,
                                       FunctionCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
     std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord\",\"pcs\":" + arr +
-                       ",\"key\":" + std::to_string(key) + "}";
+                       ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         FunctionalAnalysis fa;
         TonnetzTension tt;
@@ -181,10 +181,10 @@ void TheoryBridge::queryPLRPath(int ra, const std::string& qa,
     sendRaw(json);
 }
 
-void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, int key,
+void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, int key, int edo,
                                          ResolutionsCb cb) {
     std::string json = "{\"cmd\":\"resolution_paths\",\"tag\":\"resolution_paths\",\"root\":" + std::to_string(root) +
-                       ",\"quality\":\"" + quality + "\",\"key\":" + std::to_string(key) + "}";
+                       ",\"quality\":\"" + quality + "\",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<ResolutionPath> paths;
         size_t pa = resp.find("\"paths\"");
@@ -201,13 +201,13 @@ void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, in
     sendRaw(json);
 }
 
-void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key,
+void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key, int edo,
                                            CompletionCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
     std::string json = "{\"cmd\":\"suggest_completion\",\"tag\":\"suggest_completion\",\"pitch_classes\":" + arr +
-                       ",\"key\":" + std::to_string(key) + "}";
+                       ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<CompletionSuggestion> sugs;
         size_t sa = resp.find("\"suggestions\"");

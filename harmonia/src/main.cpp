@@ -800,7 +800,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     for (auto& v : voices) pcs.push_back(v.pitch_class);
     if (pcs.empty()) return;
 
-    theory_->queryAnalyzeChord(pcs, current_key_,
+    theory_->queryAnalyzeChord(pcs, current_key_, current_edo_,
         [this](const FunctionalAnalysis& fa, const TonnetzTension& tt) {
             last_func_    = fa;
             last_tension_ = tt;
@@ -866,7 +866,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     pcs_json += "]";
     theory_->queryRaw(
         "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord_icv\",\"pcs\":" + pcs_json +
-        ",\"key\":" + std::to_string(current_key_) + "}",
+        ",\"key\":" + std::to_string(current_key_) + ",\"edo\":" + std::to_string(current_edo_) + "}",
         "analyze_chord_icv",  // separate tag so it doesn't conflict
         [this](const std::string& resp) {
             // Extract ICV and forte number
@@ -898,7 +898,7 @@ void HarmoniaApp::updateResolutionPaths() {
     std::string qual = obj.quality;
     if (qual == "" || qual == "?") qual = "maj";
 
-    theory_->queryResolutionPaths(root, qual, current_key_,
+    theory_->queryResolutionPaths(root, qual, current_key_, current_edo_,
         [this](const std::vector<ResolutionPath>& paths) {
             last_resolutions_ = paths;
             browser_resolutions_->clear();
@@ -944,7 +944,7 @@ void HarmoniaApp::updateCompletionSuggestions() {
     std::vector<int> pcs;
     for (auto& v : voices) pcs.push_back(v.pitch_class);
 
-    theory_->querySuggestCompletion(pcs, current_key_,
+    theory_->querySuggestCompletion(pcs, current_key_, current_edo_,
         [this](const std::vector<CompletionSuggestion>& ns) {
             browser_completion_->clear();
             for (auto& s : ns) {
@@ -1044,6 +1044,11 @@ void HarmoniaApp::cbEDO(Fl_Widget*, void* d) {
     app->current_edo_ = (int)app->sp_edo_->value();
     app->tonnetz_->setEDO(app->current_edo_);
     app->audio_->setEDO(app->current_edo_);
+
+    // Refresh analysis for the new EDO
+    app->updateFunctionalAnalysis();
+    app->updateCompletionSuggestions();
+    app->updateEDOAnalysis();
 }
 
 void HarmoniaApp::cbAnalyze(Fl_Widget*, void* d) {
