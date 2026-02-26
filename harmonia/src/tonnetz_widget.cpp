@@ -8,21 +8,15 @@
 #include <cstring>
 #include <algorithm>
 
-// ────────────────────────────────────────────────────────────────────────────
-//  Pitch class → RGB colour (hue wheel by semitone)
-// ────────────────────────────────────────────────────────────────────────────
-static void pcColor(int pc, float& r, float& g, float& b) {
-    static const float COLS[12][3] = {
-        {1.0f,.35f,.35f}, {1.0f,.55f,.20f}, {1.0f,.85f,.15f}, {.75f,1.0f,.20f},
-        {.30f,1.0f,.30f}, {.20f,.95f,.55f}, {.15f,.85f,.95f}, {.20f,.50f,1.0f},
-        {.50f,.25f,1.0f}, {.80f,.20f,1.0f}, {1.0f,.20f,.80f}, {1.0f,.20f,.50f}
-    };
-    r = COLS[pc][0]; g = COLS[pc][1]; b = COLS[pc][2];
-}
 
 static const char* NOTE_NAMES_FLAT[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
 };
+
+static std::string pcLabel(int pc, int edo) {
+    if (edo == 12) return NOTE_NAMES_FLAT[pc % 12];
+    return std::to_string(pc);
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 TonnetzWidget::TonnetzWidget(int X,int Y,int W,int H,const char* l)
@@ -40,7 +34,7 @@ void TonnetzWidget::buildLattice() {
             n.x = gx - GRID_X/2;
             n.y = gy - GRID_Y/2;
             n.pitch_class = pcFromCoord(n.x, n.y);
-            n.label = NOTE_NAMES_FLAT[n.pitch_class];
+            n.label = pcLabel(n.pitch_class, edo_);
             n.cx = n.cy = 0.f;
             nodes_.push_back(n);
         }
@@ -55,6 +49,12 @@ void TonnetzWidget::setAbstractObject(const AbstractObject& o) {
 }
 void TonnetzWidget::setRoughnessRecords(const std::vector<RoughnessRecord>& rr) {
     roughness_ = rr; redraw();
+}
+void TonnetzWidget::setEDO(int edo) {
+    if (edo_ == edo) return;
+    edo_ = edo;
+    buildLattice();
+    redraw();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -186,6 +186,7 @@ void TonnetzWidget::draw() {
 
     drawTriads();
     drawEdges();
+    drawRoughnessHeat();
     drawAbstractObject();
     drawProgressionPath();
     drawNodes();
@@ -250,13 +251,13 @@ void TonnetzWidget::drawTriads() {
 
             bool maj_lit = voiceActive(a->pitch_class) && voiceActive(b->pitch_class) && voiceActive(c->pitch_class);
             float alpha = maj_lit ? 0.55f : 0.08f;
-            float pr,pg,pb; pcColor(a->pitch_class, pr,pg,pb);
+            float pr,pg,pb; Voice::pcColorHSV(a->pitch_class, edo_, pr,pg,pb);
             drawTriangle(a->cx,a->cy, b->cx,b->cy, c->cx,c->cy, pr,pg,pb, alpha);
 
             if (!d) continue;
             bool min_lit = voiceActive(b->pitch_class) && voiceActive(c->pitch_class) && voiceActive(d->pitch_class);
             alpha = min_lit ? 0.45f : 0.06f;
-            pcColor(c->pitch_class, pr,pg,pb);
+            Voice::pcColorHSV(c->pitch_class, edo_, pr,pg,pb);
             drawTriangle(b->cx,b->cy, c->cx,c->cy, d->cx,d->cy, pr*0.6f,pg*0.6f,pb*0.6f, alpha);
         }
     }
@@ -336,7 +337,7 @@ void TonnetzWidget::drawNodes() {
         }
 
         float pr,pg,pb;
-        pcColor(n.pitch_class, pr,pg,pb);
+        Voice::pcColorHSV(n.pitch_class, edo_, pr,pg,pb);
 
         if (has_voice) {
             // Active voice: bright node with glow
@@ -364,6 +365,33 @@ void TonnetzWidget::drawLabels() {
 
         int tw = (int)gl_width(n.label.c_str());
         gl_draw(n.label.c_str(), (int)n.cx - tw/2, (int)n.cy + 4);
+    }
+}
+
+void TonnetzWidget::drawRoughnessHeat() {
+    for (const auto& r : roughness_) {
+        if (r.roughness < 0.01f) continue;
+
+        const Voice *va = nullptr, *vb = nullptr;
+        for (const auto& v : voices_) {
+            if (v.id == r.voice_a) va = &v;
+            if (v.id == r.voice_b) vb = &v;
+        }
+        if (!va || !vb) continue;
+
+        // Get world positions
+        float wax = va->tonnetz_x * node_dx_ + va->tonnetz_y * node_dx_ * 0.5f;
+        float way = va->tonnetz_y * node_dy_;
+        float wbx = vb->tonnetz_x * node_dx_ + vb->tonnetz_y * node_dx_ * 0.5f;
+        float wby = vb->tonnetz_y * node_dy_;
+
+        float sax, say, sbx, sby;
+        worldToScreen(wax, way, sax, say);
+        worldToScreen(wbx, wby, sbx, sby);
+
+        // Draw glowing edge for roughness
+        float intensity = std::min(1.0f, r.roughness * 2.0f);
+        drawLine(sax, say, sbx, sby, 1.0f, 0.4f, 0.2f, 1.0f + intensity * 6.0f);
     }
 }
 

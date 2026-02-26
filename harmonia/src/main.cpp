@@ -254,6 +254,10 @@ private:
     static void cbSuggestCompletion(Fl_Widget*, void* d);
     static void cbAnalyseEDO(Fl_Widget*, void* d);
 
+    // Browser callbacks
+    static void cbBrowserResolutions(Fl_Widget* w, void* d);
+    static void cbBrowserCompletion(Fl_Widget* w, void* d);
+
     // Voice strip callbacks
     static void cbVoiceOn(Fl_Widget* w, void* d);
     static void cbVoiceAmp(Fl_Widget* w, void* d);
@@ -499,6 +503,8 @@ void HarmoniaApp::setupCallbacks() {
     sl_master_->callback(cbMasterVol, this);
     ch_key_->callback(cbKey, this);
     sp_edo_->callback(cbEDO, this);
+    browser_resolutions_->callback(cbBrowserResolutions, this);
+    browser_completion_->callback(cbBrowserCompletion, this);
     tonnetz_->setNodeClickCallback([this](int pc, int tx, int ty){
         onTonnetzClick(pc, tx, ty);
     });
@@ -514,15 +520,13 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
     static const int STRIP_H = 76;
     int sw = VOICE_PANEL_W - 12;
 
-    // Compute y inside scroll
-    int yrel = 0;
-    for (auto& unused_s : strips_) { (void)unused_s; yrel += STRIP_H + 3; }
-
     scroll_voices_->begin();
     VoiceStrip* strip = new VoiceStrip();
     strip->voice_id = id;
 
-    int gx = 4, gy = scroll_voices_->y() + yrel + 4;
+    // Initial position doesn't matter much as relayoutStrips() will fix it
+    int gx = scroll_voices_->x() + 4;
+    int gy = scroll_voices_->y() + 4;
     strip->group = new Fl_Group(gx, gy, sw, STRIP_H);
     strip->group->box(FL_FLAT_BOX);
     strip->group->color(fl_rgb_color(28,32,44));
@@ -620,8 +624,7 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
     }
 
     strips_.push_back(strip);
-    scroll_voices_->init_sizes();
-    scroll_voices_->redraw();
+    relayoutStrips();
     win_->redraw();
 }
 
@@ -652,6 +655,12 @@ void HarmoniaApp::removeVoice(int voice_id) {
 
 void HarmoniaApp::relayoutStrips() {
     static const int STRIP_H = 76;
+    // Save scroll position
+    int sx = scroll_voices_->xposition();
+    int sy = scroll_voices_->yposition();
+    // Reset scroll to 0 to position widgets correctly in absolute coordinates
+    scroll_voices_->scroll_to(0, 0);
+
     int y = scroll_voices_->y() + 4;
     for (auto* s : strips_) {
         // Use position() not resize() — resize cascades to children and can
@@ -661,6 +670,8 @@ void HarmoniaApp::relayoutStrips() {
     }
     // Recompute the scroll's virtual canvas so it knows the new total height.
     scroll_voices_->init_sizes();
+    // Restore scroll position
+    scroll_voices_->scroll_to(sx, sy);
     scroll_voices_->redraw();
 }
 
@@ -745,25 +756,33 @@ void HarmoniaApp::onIdle(void* data) {
 //  TONNETZ CLICK — add voice at clicked pitch class
 // ─────────────────────────────────────────────────────────────────────────────
 void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
-    int midi = 60 + ((pitch_class - 60%12 + 12) % 12);
-    if (midi < 48) midi += 12;
-    if (midi > 84) midi -= 12;
+    // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
+    double cents = (double)pitch_class * 1200.0 / current_edo_;
+    int closest_midi = 60 + (int)std::round(cents / 100.0);
+    float detune = (float)(cents - (closest_midi - 60) * 100.0);
 
     last_clicked_root_ = pitch_class;
     auto voices = audio_->getVoiceSnapshot();
 
-    bool found = false;
+    int existing_id = -1;
     for (auto& v : voices) {
-        if (v.active && v.pitch_class == pitch_class) {
-            audio_->noteOff(v.id); found = true; break;
+        if (v.pitch_class == pitch_class) {
+            existing_id = v.id; break;
         }
     }
-    if (!found) {
-        addVoice(midi);
+
+    if (existing_id != -1) {
+        removeVoice(existing_id);
+    } else {
+        addVoice(closest_midi);
         if (!strips_.empty()) {
             int newid = strips_.back()->voice_id;
+            audio_->setVoiceDetune(newid, detune);
+            if (auto* s = findStrip(newid)) {
+                s->sl_detune->value(detune);
+                s->btn_on->value(1);
+            }
             audio_->noteOn(newid);
-            if (auto* s = findStrip(newid)) s->btn_on->value(1);
         }
     }
 
@@ -781,7 +800,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     for (auto& v : voices) pcs.push_back(v.pitch_class);
     if (pcs.empty()) return;
 
-    theory_->queryAnalyzeChord(pcs, current_key_,
+    theory_->queryAnalyzeChord(pcs, current_key_, current_edo_,
         [this](const FunctionalAnalysis& fa, const TonnetzTension& tt) {
             last_func_    = fa;
             last_tension_ = tt;
@@ -846,17 +865,20 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     }
     pcs_json += "]";
     theory_->queryRaw(
-        "{\"cmd\":\"analyze_chord\",\"pcs\":" + pcs_json +
-        ",\"key\":" + std::to_string(current_key_) + "}",
+        "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord_icv\",\"pcs\":" + pcs_json +
+        ",\"key\":" + std::to_string(current_key_) + ",\"edo\":" + std::to_string(current_edo_) + "}",
         "analyze_chord_icv",  // separate tag so it doesn't conflict
         [this](const std::string& resp) {
             // Extract ICV and forte number
             // find ic_description
-            size_t p = resp.find("ic_description");
+            size_t p = resp.find("\"ic_description\"");
             if (p == std::string::npos) return;
-            size_t qs = resp.find('"', p+16);
+            size_t colon = resp.find(':', p + 16);
+            if (colon == std::string::npos) return;
+            size_t qs = resp.find('"', colon + 1);
+            if (qs == std::string::npos) return;
             size_t qe = resp.find('"', qs+1);
-            if (qs==std::string::npos||qe==std::string::npos) return;
+            if (qe == std::string::npos) return;
             std::string ic_desc = resp.substr(qs+1, qe-qs-1);
             std::string forte   = TheoryBridge::jStr(resp,"forte","?");
             std::string cname   = TheoryBridge::jStr(resp,"common_name","");
@@ -873,14 +895,16 @@ void HarmoniaApp::updateResolutionPaths() {
     auto obj = audio_->getAbstractObject();
     if (obj.root_pc < 0 && last_clicked_root_ < 0) return;
     int root = last_clicked_root_ >= 0 ? last_clicked_root_ : obj.root_pc;
-    std::string qual = "maj";  // default; ideally from identified chord
+    std::string qual = obj.quality;
+    if (qual == "" || qual == "?") qual = "maj";
 
-    theory_->queryResolutionPaths(root, qual, current_key_,
+    theory_->queryResolutionPaths(root, qual, current_key_, current_edo_,
         [this](const std::vector<ResolutionPath>& paths) {
             last_resolutions_ = paths;
             browser_resolutions_->clear();
 
             // Build Tonnetz progression path for visualization
+            int path_idx = 0;
             for (auto& rp : paths) {
                 char buf[256];
                 // Rule class badge
@@ -893,6 +917,7 @@ void HarmoniaApp::updateResolutionPaths() {
                          rp.voice_leading.smoothness.c_str(),
                          rp.voice_leading.distance);
                 browser_resolutions_->add(buf);
+                browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
 
                 // Explanation (word-wrapped)
                 std::string ex = rp.explanation;
@@ -905,8 +930,10 @@ void HarmoniaApp::updateResolutionPaths() {
                     snprintf(buf,sizeof(buf),"   %s->%s (%+d)",
                              m.from_name.c_str(), m.to_name.c_str(), m.semitones);
                     browser_resolutions_->add(buf);
+                    browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
                 }
                 browser_resolutions_->add(" ");
+                path_idx++;
             }
             browser_resolutions_->redraw();
         });
@@ -917,7 +944,7 @@ void HarmoniaApp::updateCompletionSuggestions() {
     std::vector<int> pcs;
     for (auto& v : voices) pcs.push_back(v.pitch_class);
 
-    theory_->querySuggestCompletion(pcs, current_key_,
+    theory_->querySuggestCompletion(pcs, current_key_, current_edo_,
         [this](const std::vector<CompletionSuggestion>& ns) {
             browser_completion_->clear();
             for (auto& s : ns) {
@@ -930,9 +957,12 @@ void HarmoniaApp::updateCompletionSuggestions() {
                          s.roughness_delta,
                          s.in_key ? "(diatonic)" : "(chromatic)");
                 browser_completion_->add(buf);
+                browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
+
                 // Structural reasons
                 for (auto& r : s.structural_reasons) {
                     browser_completion_->add(("   " + r).c_str());
+                    browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
                 }
                 if (!s.structural_reasons.empty())
                     browser_completion_->add(" ");
@@ -963,11 +993,14 @@ void HarmoniaApp::updateEDOAnalysis() {
             for (int i=0; PRIMES[i].prime; i++) {
                 size_t p = raw.find(std::string("\"")+PRIMES[i].prime+"\"");
                 if (p==std::string::npos) continue;
-                size_t ep = raw.find("error_cents",p);
+                size_t ep = raw.find("\"error_cents\"",p);
                 if (ep==std::string::npos) continue;
-                ep = raw.find_first_of("0123456789-.",ep+11);
-                size_t ee = raw.find_first_not_of("0123456789-.",ep);
-                std::string err = raw.substr(ep, ee-ep);
+                size_t colon = raw.find(':', ep + 13);
+                if (colon == std::string::npos) continue;
+                size_t val_start = raw.find_first_of("0123456789-.", colon + 1);
+                if (val_start == std::string::npos) continue;
+                size_t ee = raw.find_first_not_of("0123456789-.", val_start);
+                std::string err = raw.substr(val_start, ee-val_start);
                 float ev = std::stof(err);
                 snprintf(buf,sizeof(buf),"  prime %s (%s):  %+.2f¢",
                          PRIMES[i].prime, PRIMES[i].name, ev);
@@ -1007,7 +1040,15 @@ void HarmoniaApp::cbKey(Fl_Widget*, void* d) {
 }
 
 void HarmoniaApp::cbEDO(Fl_Widget*, void* d) {
-    ((HarmoniaApp*)d)->current_edo_ = (int)((HarmoniaApp*)d)->sp_edo_->value();
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    app->current_edo_ = (int)app->sp_edo_->value();
+    app->tonnetz_->setEDO(app->current_edo_);
+    app->audio_->setEDO(app->current_edo_);
+
+    // Refresh analysis for the new EDO
+    app->updateFunctionalAnalysis();
+    app->updateCompletionSuggestions();
+    app->updateEDOAnalysis();
 }
 
 void HarmoniaApp::cbAnalyze(Fl_Widget*, void* d) {
@@ -1024,6 +1065,52 @@ void HarmoniaApp::cbSuggestCompletion(Fl_Widget*, void* d) {
 
 void HarmoniaApp::cbAnalyseEDO(Fl_Widget*, void* d) {
     ((HarmoniaApp*)d)->updateEDOAnalysis();
+}
+
+void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) return;
+
+    int path_idx = (int)(intptr_t)b->data(line);
+    if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) return;
+
+    const auto& rp = app->last_resolutions_[path_idx];
+    // Highlight nodes for the target chord
+    std::vector<std::pair<int,int>> tpath;
+    // We don't have easy access to gx,gy for all target pcs here without another query,
+    // but we can at least show the target root on Tonnetz if we had a way.
+    // For now, let's just add the target voices if double-clicked?
+    // Actually, let's just add the target chord voices!
+    if (Fl::event_clicks()) {
+        for (int pc : rp.target_pcs) {
+            // Add voice if not present
+            bool present = false;
+            auto voices = app->audio_->getVoiceSnapshot();
+            for (auto& v : voices) if (v.pitch_class == pc) { present = true; break; }
+            if (!present) {
+                int midi = 60 + ((pc - 60%12 + 12) % 12);
+                app->addVoice(midi);
+                int newid = app->strips_.back()->voice_id;
+                app->audio_->noteOn(newid);
+            }
+        }
+    }
+}
+
+void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) return;
+
+    int pc = (int)(intptr_t)b->data(line);
+    if (pc < 0) return;
+
+    if (Fl::event_clicks()) {
+        app->onTonnetzClick(pc, 0, 0);
+    }
 }
 
 void HarmoniaApp::cbVoiceOn(Fl_Widget* w, void* d) {

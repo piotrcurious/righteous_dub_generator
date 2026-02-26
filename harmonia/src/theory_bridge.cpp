@@ -67,15 +67,21 @@ void TheoryBridge::poll() {
     std::deque<std::string> local;
     { std::lock_guard<std::mutex> lk(response_mutex_); local.swap(responses_); }
     for (auto& resp : local) {
-        std::string tag = jStr(resp,"result");
-        std::lock_guard<std::mutex> lk(pending_mutex_);
-        for (auto it = pending_cbs_.begin(); it != pending_cbs_.end(); ++it) {
-            if (it->result_tag == tag) {
-                auto cb = it->raw_cb; pending_cbs_.erase(it);
-                if (cb) { cb(resp); }
-                break;
+        std::string tag = jStr(resp,"tag");
+        if (tag.empty() || tag == "?") tag = jStr(resp,"result");
+
+        RawJsonCb cb = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(pending_mutex_);
+            for (auto it = pending_cbs_.begin(); it != pending_cbs_.end(); ++it) {
+                if (it->result_tag == tag) {
+                    cb = it->raw_cb;
+                    pending_cbs_.erase(it);
+                    break;
+                }
             }
         }
+        if (cb) { cb(resp); }
     }
 }
 
@@ -92,13 +98,13 @@ std::string TheoryBridge::sendSync(const std::string& json, int timeout_ms) {
 // ────────────────────────────────────────────────────────────────────────────
 //  Public structural queries
 // ────────────────────────────────────────────────────────────────────────────
-void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key,
+void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int edo,
                                       FunctionCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"analyze_chord\",\"pcs\":" + arr +
-                       ",\"key\":" + std::to_string(key) + "}";
+    std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord\",\"pcs\":" + arr +
+                       ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         FunctionalAnalysis fa;
         TonnetzTension tt;
@@ -141,7 +147,7 @@ void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key,
 
 void TheoryBridge::queryPLRNeighbors(int root, const std::string& quality,
                                       PLRNeighborsCb cb) {
-    std::string json = "{\"cmd\":\"plr_neighbors\",\"root\":" + std::to_string(root) +
+    std::string json = "{\"cmd\":\"plr_neighbors\",\"tag\":\"plr_neighbors\",\"root\":" + std::to_string(root) +
                        ",\"quality\":\"" + quality + "\"}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<PLRTransform> nbrs;
@@ -162,7 +168,7 @@ void TheoryBridge::queryPLRNeighbors(int root, const std::string& quality,
 void TheoryBridge::queryPLRPath(int ra, const std::string& qa,
                                  int rb, const std::string& qb,
                                  PLRPathCb cb) {
-    std::string json = "{\"cmd\":\"plr_path\",\"root_a\":" + std::to_string(ra) +
+    std::string json = "{\"cmd\":\"plr_path\",\"tag\":\"plr_path\",\"root_a\":" + std::to_string(ra) +
                        ",\"quality_a\":\"" + qa + "\",\"root_b\":" + std::to_string(rb) +
                        ",\"quality_b\":\"" + qb + "\"}";
     auto raw_cb = [cb](const std::string& resp) {
@@ -175,10 +181,10 @@ void TheoryBridge::queryPLRPath(int ra, const std::string& qa,
     sendRaw(json);
 }
 
-void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, int key,
+void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, int key, int edo,
                                          ResolutionsCb cb) {
-    std::string json = "{\"cmd\":\"resolution_paths\",\"root\":" + std::to_string(root) +
-                       ",\"quality\":\"" + quality + "\",\"key\":" + std::to_string(key) + "}";
+    std::string json = "{\"cmd\":\"resolution_paths\",\"tag\":\"resolution_paths\",\"root\":" + std::to_string(root) +
+                       ",\"quality\":\"" + quality + "\",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<ResolutionPath> paths;
         size_t pa = resp.find("\"paths\"");
@@ -195,13 +201,13 @@ void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, in
     sendRaw(json);
 }
 
-void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key,
+void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key, int edo,
                                            CompletionCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"suggest_completion\",\"pitch_classes\":" + arr +
-                       ",\"key\":" + std::to_string(key) + "}";
+    std::string json = "{\"cmd\":\"suggest_completion\",\"tag\":\"suggest_completion\",\"pitch_classes\":" + arr +
+                       ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<CompletionSuggestion> sugs;
         size_t sa = resp.find("\"suggestions\"");
@@ -224,7 +230,7 @@ void TheoryBridge::queryOrbifoldDistance(const std::vector<int>& a,
     auto mkArr = [](const std::vector<int>& v) {
         std::string s="["; for(size_t i=0;i<v.size();i++){s+=std::to_string(v[i]);if(i+1<v.size())s+=",";}; return s+"]";
     };
-    std::string json = "{\"cmd\":\"orbifold_distance\",\"chord_a\":" + mkArr(a) +
+    std::string json = "{\"cmd\":\"orbifold_distance\",\"tag\":\"orbifold_distance\",\"chord_a\":" + mkArr(a) +
                        ",\"chord_b\":" + mkArr(b) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         if (cb) cb(parseVoiceLeading(resp));
@@ -243,7 +249,7 @@ void TheoryBridge::queryDetectSequence(
         if (i+1 < chords.size()) arr += ",";
     }
     arr += "]";
-    std::string json = "{\"cmd\":\"detect_sequence\",\"chords\":" + arr + "}";
+    std::string json = "{\"cmd\":\"detect_sequence\",\"tag\":\"detect_sequence\",\"chords\":" + arr + "}";
     auto raw_cb = [cb](const std::string& resp) {
         SequenceInfo si;
         si.type                    = jStr(resp,"sequence_type");
@@ -260,7 +266,7 @@ void TheoryBridge::queryDetectSequence(
 }
 
 void TheoryBridge::queryEDOAnalysis(int edo, RawJsonCb cb) {
-    std::string json = "{\"cmd\":\"edo_analysis\",\"edo\":" + std::to_string(edo) + "}";
+    std::string json = "{\"cmd\":\"edo_analysis\",\"tag\":\"edo_analysis\",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) { if(cb) cb(resp); };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
       pending_cbs_.push_back({"edo_analysis", raw_cb}); }
@@ -277,55 +283,58 @@ void TheoryBridge::queryRaw(const std::string& json, const std::string& tag, Raw
 // ────────────────────────────────────────────────────────────────────────────
 //  JSON helpers (minimal, no external deps)
 // ────────────────────────────────────────────────────────────────────────────
-int TheoryBridge::jInt(const std::string& j, const std::string& k, int d) {
+static size_t findValPos(const std::string& j, const std::string& k) {
     std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p = j.find_first_of("0123456789-", p+needle.size()+1);
-    if(p==std::string::npos) return d;
-    return std::stoi(j.substr(p));
+    size_t p = j.find(needle);
+    if (p == std::string::npos) return std::string::npos;
+    p = j.find(':', p + needle.size());
+    if (p == std::string::npos) return std::string::npos;
+    p++; // skip colon
+    while (p < j.size() && (j[p] == ' ' || j[p] == '\t' || j[p] == '\n' || j[p] == '\r')) p++;
+    return p;
+}
+
+int TheoryBridge::jInt(const std::string& j, const std::string& k, int d) {
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
+    try { return std::stoi(j.substr(p)); } catch(...) { return d; }
 }
 
 float TheoryBridge::jFloat(const std::string& j, const std::string& k, float d) {
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p = j.find_first_of("0123456789-.", p+needle.size()+1);
-    if(p==std::string::npos) return d;
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
     try { return std::stof(j.substr(p)); } catch(...) { return d; }
 }
 
 std::string TheoryBridge::jStr(const std::string& j, const std::string& k,
                                 const std::string& d) {
-    std::string needle = "\"" + k + "\":\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p += needle.size();
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '"') return d;
+    p++; // skip quote
     size_t e = p;
-    while (e < j.size() && !(j[e]=='"' && (e==0||j[e-1]!='\\'))) e++;
-    return (e<j.size()) ? j.substr(p,e-p) : d;
+    while (e < j.size() && !(j[e] == '"' && (e == 0 || j[e-1] != '\\'))) e++;
+    return (e < j.size()) ? j.substr(p, e - p) : d;
 }
 
 bool TheoryBridge::jBool(const std::string& j, const std::string& k, bool d) {
-    std::string needle = "\"" + k + "\":";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p += needle.size();
-    while (p<j.size() && j[p]==' ') p++;
-    if (p<j.size()) {
-        if (j[p]=='t') return true;
-        if (j[p]=='f') return false;
-    }
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
+    if (j[p] == 't') return true;
+    if (j[p] == 'f') return false;
     return d;
 }
 
 std::vector<int> TheoryBridge::jIntArr(const std::string& j, const std::string& k) {
     std::vector<int> result;
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return result;
-    size_t as = j.find('[',p), ae = j.find(']',as);
-    if(as==std::string::npos||ae==std::string::npos) return result;
-    std::string arr = j.substr(as+1,ae-as-1);
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '[') return result;
+    size_t as = p, ae = j.find(']', as);
+    if (ae == std::string::npos) return result;
+    std::string arr = j.substr(as + 1, ae - as - 1);
     std::istringstream iss(arr);
     std::string tok;
-    while (std::getline(iss,tok,',')) {
-        tok.erase(std::remove_if(tok.begin(),tok.end(),[](char c){return c==' ';}),tok.end());
+    while (std::getline(iss, tok, ',')) {
+        tok.erase(std::remove_if(tok.begin(), tok.end(), [](char c){ return isspace(c); }), tok.end());
         if (!tok.empty()) try { result.push_back(std::stoi(tok)); } catch(...) {}
     }
     return result;
@@ -333,11 +342,11 @@ std::vector<int> TheoryBridge::jIntArr(const std::string& j, const std::string& 
 
 std::vector<std::string> TheoryBridge::jStrArr(const std::string& j, const std::string& k) {
     std::vector<std::string> result;
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return result;
-    size_t as = j.find('[',p), ae = j.find(']',as);
-    if(as==std::string::npos||ae==std::string::npos) return result;
-    std::string arr = j.substr(as+1,ae-as-1);
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '[') return result;
+    size_t as = p, ae = j.find(']', as);
+    if (ae == std::string::npos) return result;
+    std::string arr = j.substr(as + 1, ae - as - 1);
     size_t pos = 0;
     while (pos < arr.size()) {
         size_t qs = arr.find('"',pos); if(qs==std::string::npos) break;

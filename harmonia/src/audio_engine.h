@@ -39,6 +39,7 @@ struct RoughnessRecord {
 // ── Abstract object: a perceptual gestalt across voices
 struct AbstractObject {
     std::string chord_name;       // e.g. "Cmaj7", "G7", "Am"
+    std::string quality;          // e.g. "maj", "min"
     int         root_pc;          // 0-11
     float       confidence;       // 0-1
     float       roughness_total;  // aggregate
@@ -77,6 +78,10 @@ public:
     AbstractObject getAbstractObject() const;
     SpectrumSnapshot getSpectrumSnapshot() const;
 
+    // ── settings
+    void setEDO(int edo);
+    int  getEDO() const { return edo_.load(); }
+
     // ── master
     void setMasterVolume(float v) { master_volume_.store(v); }
     float getMasterVolume() const  { return master_volume_.load(); }
@@ -104,6 +109,7 @@ private:
     std::thread audio_thread_;
     std::atomic<bool> running_{false};
     std::atomic<float> master_volume_{0.5f};
+    std::atomic<int>   edo_{12};
 
     // ── shared results (written by audio thread, read by UI)
     mutable std::mutex results_mutex_;

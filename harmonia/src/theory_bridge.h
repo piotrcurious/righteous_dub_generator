@@ -151,7 +151,7 @@ public:
     // ── Structural queries (all async, result via callback)
 
     // Full structural analysis of current chord
-    void queryAnalyzeChord(const std::vector<int>& pcs, int key,
+    void queryAnalyzeChord(const std::vector<int>& pcs, int key, int edo,
                            FunctionCb cb);
 
     // PLR neighborhood (3 direct neighbors with justification)
@@ -164,11 +164,11 @@ public:
                       PLRPathCb cb);
 
     // Resolution paths (algebraically justified, not probabilistic)
-    void queryResolutionPaths(int root, const std::string& quality, int key,
+    void queryResolutionPaths(int root, const std::string& quality, int key, int edo,
                                ResolutionsCb cb);
 
     // Completion suggestions with structural reasons
-    void querySuggestCompletion(const std::vector<int>& pcs, int key,
+    void querySuggestCompletion(const std::vector<int>& pcs, int key, int edo,
                                  CompletionCb cb);
 
     // Orbifold voice-leading

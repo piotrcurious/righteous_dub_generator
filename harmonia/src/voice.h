@@ -35,8 +35,9 @@ struct Voice {
 
     // ── pitch
     double frequency;         // fundamental Hz (concert pitch A4=440)
-    int    pitch_class;       // 0-11 (C=0, C#=1, ... B=11)
+    int    pitch_class;       // 0..edo-1
     int    octave;            // MIDI octave (4 = middle C octave)
+    int    edo{12};
     float  detune_cents;      // fine tuning in cents (−50 to +50)
 
     // ── amplitude / envelope
@@ -61,6 +62,26 @@ struct Voice {
     // ── Tonnetz coordinates (5-limit JI lattice)
     int tonnetz_x{0};   // fifths axis (×3/2)
     int tonnetz_y{0};   // thirds axis (×5/4)
+
+    static void pcColorHSV(int pc, int edo_val, float& r, float& g, float& b) {
+        r = g = b = 1.0f;
+        if (edo_val <= 0) return;
+        float h = (float)(pc % edo_val) / edo_val;
+        float s = 0.75f, v = 0.95f;
+        int i = (int)(h * 6);
+        float f = h * 6 - i;
+        float p = v * (1 - s);
+        float q = v * (1 - f * s);
+        float t = v * (1 - (1 - f) * s);
+        switch (i % 6) {
+            case 0: r = v; g = t; b = p; break;
+            case 1: r = q; g = v; b = p; break;
+            case 2: r = p; g = v; b = t; break;
+            case 3: r = p; g = q; b = v; break;
+            case 4: r = t; g = p; b = v; break;
+            case 5: r = v; g = p; b = q; break;
+        }
+    }
 
     // ── display
     float color[3]{0.5f, 0.7f, 1.0f};   // RGB for UI
@@ -129,13 +150,17 @@ struct Voice {
                 2.0 * M_PI * k * f_actual / SAMPLE_RATE
             );
         }
+
+        double logf = std::log2(f_actual / 261.63); // Relative to C4
+        logf = logf - std::floor(logf); // mod octave
+        pitch_class = (int)std::round(logf * edo) % edo;
+
         computeTonnetzCoords();
     }
 
     // ────── set pitch by MIDI note number
     void setMidiNote(int midi_note) {
         octave     = midi_note / 12 - 1;
-        pitch_class = midi_note % 12;
         setFrequency(440.0 * std::pow(2.0, (midi_note - 69) / 12.0));
     }
 
