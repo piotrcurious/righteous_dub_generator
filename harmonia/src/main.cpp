@@ -1071,18 +1071,21 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
     HarmoniaApp* app = (HarmoniaApp*)d;
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
-    if (line <= 0) return;
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
     int path_idx = (int)(intptr_t)b->data(line);
-    if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) return;
+    if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
     const auto& rp = app->last_resolutions_[path_idx];
+    app->tonnetz_->setHighlightedPC(rp.target_root);
+
     // Highlight nodes for the target chord
-    std::vector<std::pair<int,int>> tpath;
-    // We don't have easy access to gx,gy for all target pcs here without another query,
-    // but we can at least show the target root on Tonnetz if we had a way.
-    // For now, let's just add the target voices if double-clicked?
-    // Actually, let's just add the target chord voices!
     if (Fl::event_clicks()) {
         for (int pc : rp.target_pcs) {
             // Add voice if not present
@@ -1090,10 +1093,20 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
             auto voices = app->audio_->getVoiceSnapshot();
             for (auto& v : voices) if (v.pitch_class == pc) { present = true; break; }
             if (!present) {
-                int midi = 60 + ((pc - 60%12 + 12) % 12);
-                app->addVoice(midi);
-                int newid = app->strips_.back()->voice_id;
-                app->audio_->noteOn(newid);
+                double cents = (double)pc * 1200.0 / app->current_edo_;
+                int closest_midi = 60 + (int)std::round(cents / 100.0);
+                float detune = (float)(cents - (closest_midi - 60) * 100.0);
+
+                app->addVoice(closest_midi);
+                if (!app->strips_.empty()) {
+                    int newid = app->strips_.back()->voice_id;
+                    app->audio_->setVoiceDetune(newid, detune);
+                    if (auto* s = app->findStrip(newid)) {
+                        s->sl_detune->value(detune);
+                        s->btn_on->value(1);
+                    }
+                    app->audio_->noteOn(newid);
+                }
             }
         }
     }
@@ -1103,11 +1116,20 @@ void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
     HarmoniaApp* app = (HarmoniaApp*)d;
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
-    if (line <= 0) return;
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
     int pc = (int)(intptr_t)b->data(line);
-    if (pc < 0) return;
+    if (pc < 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
+    app->tonnetz_->setHighlightedPC(pc);
+
+    // Single click for highlighting (already done above), double click to add
     if (Fl::event_clicks()) {
         app->onTonnetzClick(pc, 0, 0);
     }

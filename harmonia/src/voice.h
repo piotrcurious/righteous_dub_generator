@@ -229,7 +229,7 @@ struct Voice {
 
 // ────── note name utilities
 static const char* NOTE_NAMES[12] = {
-    "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
+    "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
 };
 
 inline std::string noteName(int pitch_class, int octave) {

@@ -69,19 +69,14 @@ void TonnetzWidget::worldToScreen(float wx, float wy, float& sx, float& sy) {
 void TonnetzWidget::screenToWorld(int sx, int sy, float& wx, float& wy) {
     float cx = w() * 0.5f, cy = h() * 0.5f;
     wx = (sx - cx) / zoom_ - pan_x_;
-    wy = -(sy - cy) / zoom_ + pan_y_;
+    wy = -(sy - cy) / zoom_ - pan_y_;
 }
 
 TonnetzNode* TonnetzWidget::nodeAt(int sx, int sy) {
-    float wx, wy;
-    screenToWorld(sx, sy, wx, wy);
     TonnetzNode* best = nullptr;
-    float bestd = 22.f * zoom_;
+    float bestd = 24.f;
     for (auto& n : nodes_) {
-        // node world position
-        float nx = n.x * node_dx_ + n.y * node_dx_ * 0.5f;
-        float ny = n.y * node_dy_;
-        float d = std::sqrt((wx-nx)*(wx-nx)+(wy-ny)*(wy-ny));
+        float d = std::sqrt((sx - n.cx) * (sx - n.cx) + (sy - n.cy) * (sy - n.cy));
         if (d < bestd) { bestd = d; best = &n; }
     }
     return best;
@@ -344,6 +339,11 @@ void TonnetzWidget::drawNodes() {
             drawFilledCircle(n.cx, n.cy, 20.f, vr*.3f,vg*.3f,vb*.3f, 0.5f);
             drawFilledCircle(n.cx, n.cy, 18.f, vr,vg,vb, 1.f);
             drawRing(n.cx, n.cy, 22.f, 2.f, 1.f,1.f,1.f, 0.7f);
+        } else if (n.pitch_class == highlighted_pc_) {
+            // Highlighted but inactive
+            drawFilledCircle(n.cx, n.cy, 20.f, 1.0f, 1.0f, 0.4f, 0.4f);
+            drawFilledCircle(n.cx, n.cy, 16.f, 1.0f, 1.0f, 0.6f, 0.8f);
+            drawRing(n.cx, n.cy, 22.f, 2.f, 1.0f, 1.0f, 0.0f, 0.8f);
         } else {
             // Inactive: dark node
             drawFilledCircle(n.cx, n.cy, 16.f, pr*.15f,pg*.15f,pb*.15f, 1.f);
