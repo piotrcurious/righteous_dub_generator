@@ -95,6 +95,7 @@ int AudioEngine::addVoice(int midi_note, TimbrePreset timbre) {
     if ((int)voices_.size() >= MAX_VOICES) return -1;
     Voice v;
     v.id = next_voice_id_++;
+    v.edo = edo_.load();
     v.name = std::string(NOTE_NAMES[midi_note % 12]) + std::to_string(midi_note/12-1);
     v.setTimbre(timbre);
     v.setMidiNote(midi_note);
@@ -159,6 +160,7 @@ void AudioEngine::setVoiceDetune(int voice_id, float cents) {
     std::lock_guard<std::mutex> lk(voices_mutex_);
     for (auto& v : voices_) if (v.id == voice_id) {
         v.detune_cents = cents;
+        v.edo = edo_.load();
         v.setFrequency(v.frequency);
         break;
     }

@@ -283,55 +283,58 @@ void TheoryBridge::queryRaw(const std::string& json, const std::string& tag, Raw
 // ────────────────────────────────────────────────────────────────────────────
 //  JSON helpers (minimal, no external deps)
 // ────────────────────────────────────────────────────────────────────────────
-int TheoryBridge::jInt(const std::string& j, const std::string& k, int d) {
+static size_t findValPos(const std::string& j, const std::string& k) {
     std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p = j.find_first_of("0123456789-", p+needle.size()+1);
-    if(p==std::string::npos) return d;
-    return std::stoi(j.substr(p));
+    size_t p = j.find(needle);
+    if (p == std::string::npos) return std::string::npos;
+    p = j.find(':', p + needle.size());
+    if (p == std::string::npos) return std::string::npos;
+    p++; // skip colon
+    while (p < j.size() && (j[p] == ' ' || j[p] == '\t' || j[p] == '\n' || j[p] == '\r')) p++;
+    return p;
+}
+
+int TheoryBridge::jInt(const std::string& j, const std::string& k, int d) {
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
+    try { return std::stoi(j.substr(p)); } catch(...) { return d; }
 }
 
 float TheoryBridge::jFloat(const std::string& j, const std::string& k, float d) {
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p = j.find_first_of("0123456789-.", p+needle.size()+1);
-    if(p==std::string::npos) return d;
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
     try { return std::stof(j.substr(p)); } catch(...) { return d; }
 }
 
 std::string TheoryBridge::jStr(const std::string& j, const std::string& k,
                                 const std::string& d) {
-    std::string needle = "\"" + k + "\":\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p += needle.size();
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '"') return d;
+    p++; // skip quote
     size_t e = p;
-    while (e < j.size() && !(j[e]=='"' && (e==0||j[e-1]!='\\'))) e++;
-    return (e<j.size()) ? j.substr(p,e-p) : d;
+    while (e < j.size() && !(j[e] == '"' && (e == 0 || j[e-1] != '\\'))) e++;
+    return (e < j.size()) ? j.substr(p, e - p) : d;
 }
 
 bool TheoryBridge::jBool(const std::string& j, const std::string& k, bool d) {
-    std::string needle = "\"" + k + "\":";
-    size_t p = j.find(needle); if(p==std::string::npos) return d;
-    p += needle.size();
-    while (p<j.size() && j[p]==' ') p++;
-    if (p<j.size()) {
-        if (j[p]=='t') return true;
-        if (j[p]=='f') return false;
-    }
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos) return d;
+    if (j[p] == 't') return true;
+    if (j[p] == 'f') return false;
     return d;
 }
 
 std::vector<int> TheoryBridge::jIntArr(const std::string& j, const std::string& k) {
     std::vector<int> result;
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return result;
-    size_t as = j.find('[',p), ae = j.find(']',as);
-    if(as==std::string::npos||ae==std::string::npos) return result;
-    std::string arr = j.substr(as+1,ae-as-1);
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '[') return result;
+    size_t as = p, ae = j.find(']', as);
+    if (ae == std::string::npos) return result;
+    std::string arr = j.substr(as + 1, ae - as - 1);
     std::istringstream iss(arr);
     std::string tok;
-    while (std::getline(iss,tok,',')) {
-        tok.erase(std::remove_if(tok.begin(),tok.end(),[](char c){return c==' ';}),tok.end());
+    while (std::getline(iss, tok, ',')) {
+        tok.erase(std::remove_if(tok.begin(), tok.end(), [](char c){ return isspace(c); }), tok.end());
         if (!tok.empty()) try { result.push_back(std::stoi(tok)); } catch(...) {}
     }
     return result;
@@ -339,11 +342,11 @@ std::vector<int> TheoryBridge::jIntArr(const std::string& j, const std::string& 
 
 std::vector<std::string> TheoryBridge::jStrArr(const std::string& j, const std::string& k) {
     std::vector<std::string> result;
-    std::string needle = "\"" + k + "\"";
-    size_t p = j.find(needle); if(p==std::string::npos) return result;
-    size_t as = j.find('[',p), ae = j.find(']',as);
-    if(as==std::string::npos||ae==std::string::npos) return result;
-    std::string arr = j.substr(as+1,ae-as-1);
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '[') return result;
+    size_t as = p, ae = j.find(']', as);
+    if (ae == std::string::npos) return result;
+    std::string arr = j.substr(as + 1, ae - as - 1);
     size_t pos = 0;
     while (pos < arr.size()) {
         size_t qs = arr.find('"',pos); if(qs==std::string::npos) break;

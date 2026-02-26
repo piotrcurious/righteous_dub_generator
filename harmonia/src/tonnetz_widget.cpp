@@ -24,6 +24,11 @@ static const char* NOTE_NAMES_FLAT[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
 };
 
+static std::string pcLabel(int pc, int edo) {
+    if (edo == 12) return NOTE_NAMES_FLAT[pc % 12];
+    return std::to_string(pc);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 TonnetzWidget::TonnetzWidget(int X,int Y,int W,int H,const char* l)
     : Fl_Gl_Window(X,Y,W,H,l)
@@ -40,7 +45,7 @@ void TonnetzWidget::buildLattice() {
             n.x = gx - GRID_X/2;
             n.y = gy - GRID_Y/2;
             n.pitch_class = pcFromCoord(n.x, n.y);
-            n.label = NOTE_NAMES_FLAT[n.pitch_class];
+            n.label = pcLabel(n.pitch_class, edo_);
             n.cx = n.cy = 0.f;
             nodes_.push_back(n);
         }
@@ -55,6 +60,12 @@ void TonnetzWidget::setAbstractObject(const AbstractObject& o) {
 }
 void TonnetzWidget::setRoughnessRecords(const std::vector<RoughnessRecord>& rr) {
     roughness_ = rr; redraw();
+}
+void TonnetzWidget::setEDO(int edo) {
+    if (edo_ == edo) return;
+    edo_ = edo;
+    buildLattice();
+    redraw();
 }
 
 // ────────────────────────────────────────────────────────────────────────────

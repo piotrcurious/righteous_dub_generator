@@ -78,6 +78,10 @@ public:
     AbstractObject getAbstractObject() const;
     SpectrumSnapshot getSpectrumSnapshot() const;
 
+    // ── settings
+    void setEDO(int edo) { edo_.store(edo); }
+    int  getEDO() const { return edo_.load(); }
+
     // ── master
     void setMasterVolume(float v) { master_volume_.store(v); }
     float getMasterVolume() const  { return master_volume_.load(); }
@@ -105,6 +109,7 @@ private:
     std::thread audio_thread_;
     std::atomic<bool> running_{false};
     std::atomic<float> master_volume_{0.5f};
+    std::atomic<int>   edo_{12};
 
     // ── shared results (written by audio thread, read by UI)
     mutable std::mutex results_mutex_;

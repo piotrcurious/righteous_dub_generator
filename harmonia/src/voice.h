@@ -35,8 +35,9 @@ struct Voice {
 
     // ── pitch
     double frequency;         // fundamental Hz (concert pitch A4=440)
-    int    pitch_class;       // 0-11 (C=0, C#=1, ... B=11)
+    int    pitch_class;       // 0..edo-1
     int    octave;            // MIDI octave (4 = middle C octave)
+    int    edo{12};
     float  detune_cents;      // fine tuning in cents (−50 to +50)
 
     // ── amplitude / envelope
@@ -129,13 +130,17 @@ struct Voice {
                 2.0 * M_PI * k * f_actual / SAMPLE_RATE
             );
         }
+
+        double logf = std::log2(f_actual / 261.63); // Relative to C4
+        logf = logf - std::floor(logf); // mod octave
+        pitch_class = (int)std::round(logf * edo) % edo;
+
         computeTonnetzCoords();
     }
 
     // ────── set pitch by MIDI note number
     void setMidiNote(int midi_note) {
         octave     = midi_note / 12 - 1;
-        pitch_class = midi_note % 12;
         setFrequency(440.0 * std::pow(2.0, (midi_note - 69) / 12.0));
     }
 

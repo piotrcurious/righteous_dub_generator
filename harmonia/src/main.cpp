@@ -756,9 +756,10 @@ void HarmoniaApp::onIdle(void* data) {
 //  TONNETZ CLICK — add voice at clicked pitch class
 // ─────────────────────────────────────────────────────────────────────────────
 void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
-    int midi = 60 + ((pitch_class - 60%12 + 12) % 12);
-    if (midi < 48) midi += 12;
-    if (midi > 84) midi -= 12;
+    // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
+    double cents = (double)pitch_class * 1200.0 / current_edo_;
+    int closest_midi = 60 + (int)std::round(cents / 100.0);
+    float detune = (float)(cents - (closest_midi - 60) * 100.0);
 
     last_clicked_root_ = pitch_class;
     auto voices = audio_->getVoiceSnapshot();
@@ -773,11 +774,15 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
     if (existing_id != -1) {
         removeVoice(existing_id);
     } else {
-        addVoice(midi);
+        addVoice(closest_midi);
         if (!strips_.empty()) {
             int newid = strips_.back()->voice_id;
+            audio_->setVoiceDetune(newid, detune);
+            if (auto* s = findStrip(newid)) {
+                s->sl_detune->value(detune);
+                s->btn_on->value(1);
+            }
             audio_->noteOn(newid);
-            if (auto* s = findStrip(newid)) s->btn_on->value(1);
         }
     }
 
@@ -866,11 +871,14 @@ void HarmoniaApp::updateFunctionalAnalysis() {
         [this](const std::string& resp) {
             // Extract ICV and forte number
             // find ic_description
-            size_t p = resp.find("ic_description");
+            size_t p = resp.find("\"ic_description\"");
             if (p == std::string::npos) return;
-            size_t qs = resp.find('"', p+16);
+            size_t colon = resp.find(':', p + 16);
+            if (colon == std::string::npos) return;
+            size_t qs = resp.find('"', colon + 1);
+            if (qs == std::string::npos) return;
             size_t qe = resp.find('"', qs+1);
-            if (qs==std::string::npos||qe==std::string::npos) return;
+            if (qe == std::string::npos) return;
             std::string ic_desc = resp.substr(qs+1, qe-qs-1);
             std::string forte   = TheoryBridge::jStr(resp,"forte","?");
             std::string cname   = TheoryBridge::jStr(resp,"common_name","");
@@ -985,11 +993,14 @@ void HarmoniaApp::updateEDOAnalysis() {
             for (int i=0; PRIMES[i].prime; i++) {
                 size_t p = raw.find(std::string("\"")+PRIMES[i].prime+"\"");
                 if (p==std::string::npos) continue;
-                size_t ep = raw.find("error_cents",p);
+                size_t ep = raw.find("\"error_cents\"",p);
                 if (ep==std::string::npos) continue;
-                ep = raw.find_first_of("0123456789-.",ep+11);
-                size_t ee = raw.find_first_not_of("0123456789-.",ep);
-                std::string err = raw.substr(ep, ee-ep);
+                size_t colon = raw.find(':', ep + 13);
+                if (colon == std::string::npos) continue;
+                size_t val_start = raw.find_first_of("0123456789-.", colon + 1);
+                if (val_start == std::string::npos) continue;
+                size_t ee = raw.find_first_not_of("0123456789-.", val_start);
+                std::string err = raw.substr(val_start, ee-val_start);
                 float ev = std::stof(err);
                 snprintf(buf,sizeof(buf),"  prime %s (%s):  %+.2f¢",
                          PRIMES[i].prime, PRIMES[i].name, ev);
@@ -1029,7 +1040,10 @@ void HarmoniaApp::cbKey(Fl_Widget*, void* d) {
 }
 
 void HarmoniaApp::cbEDO(Fl_Widget*, void* d) {
-    ((HarmoniaApp*)d)->current_edo_ = (int)((HarmoniaApp*)d)->sp_edo_->value();
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    app->current_edo_ = (int)app->sp_edo_->value();
+    app->tonnetz_->setEDO(app->current_edo_);
+    app->audio_->setEDO(app->current_edo_);
 }
 
 void HarmoniaApp::cbAnalyze(Fl_Widget*, void* d) {

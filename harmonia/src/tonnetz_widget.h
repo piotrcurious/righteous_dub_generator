@@ -41,6 +41,7 @@ public:
     void setVoices(const std::vector<Voice>& voices);
     void setAbstractObject(const AbstractObject& obj);
     void setRoughnessRecords(const std::vector<RoughnessRecord>& rr);
+    void setEDO(int edo);
 
     // ── callback: user clicked a node → suggested note
     using NodeClickCb = std::function<void(int pitch_class, int tonnetz_x, int tonnetz_y)>;
@@ -61,6 +62,7 @@ private:
     std::vector<TonnetzNode> nodes_;
 
     // ── display state
+    int                       edo_{12};
     std::vector<Voice>        voices_;
     AbstractObject            abs_obj_;
     std::vector<RoughnessRecord> roughness_;
@@ -100,9 +102,12 @@ private:
                       float r, float g, float b, float a=0.3f);
     void drawLine(float x1,float y1, float x2,float y2, float r,float g,float b,float lw=1.f);
 
-    static int pcFromCoord(int gx, int gy) {
-        // Fifth +7 semitones, Third +4 semitones (mod 12)
-        return ((gx * 7 + gy * 4) % 12 + 12) % 12;
+    int pcFromCoord(int gx, int gy) const {
+        // In 12-EDO: Fifth = 7 steps, Third = 4 steps
+        // General EDO: find nearest integer steps for 3/2 and 5/4
+        int fifth_steps = (int)std::round(std::log2(1.5) * edo_);
+        int third_steps = (int)std::round(std::log2(1.25) * edo_);
+        return ((gx * fifth_steps + gy * third_steps) % edo_ + edo_) % edo_;
     }
 
     bool gl_inited_{false};
