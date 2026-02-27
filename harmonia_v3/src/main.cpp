@@ -32,6 +32,7 @@
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Light_Button.H>
 #include <FL/Fl_Browser.H>
+#include <FL/Fl_Tabs.H>
 #include <FL/Fl_Spinner.H>
 #include <FL/fl_draw.H>
 #include <FL/fl_ask.H>
@@ -198,6 +199,11 @@ private:
     // Centre – Tonnetz
     TonnetzWidget*    tonnetz_{nullptr};
 
+    // Right – Side Panel
+    Fl_Tabs*     tabs_right_{nullptr};
+    Fl_Group*    grp_theory_{nullptr};
+    Fl_Group*    grp_instrument_{nullptr};
+
     // Right – structural theory panel
     Fl_Browser*  browser_function_{nullptr};    // function + algebraic reasons
     Fl_Browser*  browser_resolutions_{nullptr}; // resolution paths with justification
@@ -210,6 +216,16 @@ private:
     Fl_Button*   btn_psycho_{nullptr};
     Fl_Button*   btn_edo_{nullptr};
     Fl_Output*   out_orbifold_{nullptr};
+
+    // Instrument Builder
+    struct ChordKey {
+        std::string name;
+        std::vector<int> pcs;
+    };
+    std::vector<ChordKey> instrument_keyboard_;
+    Fl_Browser* browser_keys_{nullptr};
+    Fl_Button* btn_add_chord_{nullptr};
+    Fl_Button* btn_clear_keys_{nullptr};
 
     // Bottom – spectrum + roughness
     SpectrumWidget*   spectrum_{nullptr};
@@ -257,6 +273,16 @@ private:
     static void cbSuggestCompletion(Fl_Widget*, void* d);
     static void cbPsycho(Fl_Widget*, void* d);
     static void cbAnalyseEDO(Fl_Widget*, void* d);
+
+    // Instrument Builder callbacks
+    static void cbAddChordToKeys(Fl_Widget*, void* d);
+    static void cbClearKeys(Fl_Widget*, void* d);
+    static void cbBrowserKeys(Fl_Widget*, void* d);
+    void playChord(const ChordKey& chord, bool sustain);
+    void releaseChord(const ChordKey& chord);
+
+    // Keyboard handling
+    int handle(int event);
 
     // Browser callbacks
     static void cbBrowserResolutions(Fl_Widget* w, void* d);
@@ -333,7 +359,19 @@ void HarmoniaApp::buildUI() {
     Fl::background(18,20,28);
     Fl::foreground(220,215,200);
 
-    win_ = new Fl_Double_Window(WIN_W, WIN_H, "Harmonia — Psychoacoustic Music Coder");
+    // Custom window class to handle events
+    class HarmoniaWindow : public Fl_Double_Window {
+        HarmoniaApp* app_;
+    public:
+        HarmoniaWindow(int W, int H, const char* L, HarmoniaApp* a)
+            : Fl_Double_Window(W, H, L), app_(a) {}
+        int handle(int e) override {
+            if (app_->handle(e)) return 1;
+            return Fl_Double_Window::handle(e);
+        }
+    };
+
+    win_ = new HarmoniaWindow(WIN_W, WIN_H, "Harmonia — Psychoacoustic Music Coder", this);
     win_->color(COL_BG);
 
     // ── TOOLBAR ──────────────────────────────────────────────────────────────
@@ -410,13 +448,20 @@ void HarmoniaApp::buildUI() {
         tonnetz_ = new TonnetzWidget(VOICE_PANEL_W, content_y, TONNETZ_W, content_h);
     }
 
-    // ── THEORY PANEL (right) — STRUCTURAL EDITION ────────────────────────────
+    // ── SIDE PANEL (right) — TABS ────────────────────────────────────────────
     {
         int tx = VOICE_PANEL_W + TONNETZ_W;
-        Fl_Group* panel = new Fl_Group(tx, content_y, THEORY_PANEL_W, content_h);
-        panel->box(FL_FLAT_BOX); panel->color(fl_rgb_color(22,26,35));
+        tabs_right_ = new Fl_Tabs(tx, content_y, THEORY_PANEL_W, content_h);
+        tabs_right_->box(FL_FLAT_BOX);
+        tabs_right_->color(fl_rgb_color(20,24,32));
+        tabs_right_->selection_color(fl_rgb_color(30,34,46));
+        tabs_right_->labelcolor(COL_TEXT);
 
-        int py = content_y+4, pw = THEORY_PANEL_W-8, px = tx+4;
+        // ── TAB 1: THEORY ────────────────────────────────────────────────────
+        grp_theory_ = new Fl_Group(tx, content_y + 25, THEORY_PANEL_W, content_h - 25, "Theory");
+        grp_theory_->box(FL_FLAT_BOX); grp_theory_->color(fl_rgb_color(22,26,35));
+
+        int py = content_y + 25 + 4, pw = THEORY_PANEL_W - 8, px = tx + 4;
 
         // ─ Functional Analysis
         auto* h1 = new Fl_Box(px,py,pw,16,"HARMONIC FUNCTION");
@@ -490,7 +535,32 @@ void HarmoniaApp::buildUI() {
         btn_edo_->labelsize(9); btn_edo_->color(fl_rgb_color(40,25,70));
         btn_edo_->callback(cbAnalyseEDO, this);
 
-        panel->end();
+        grp_theory_->end();
+
+        // ── TAB 2: INSTRUMENT ────────────────────────────────────────────────
+        grp_instrument_ = new Fl_Group(tx, content_y + 25, THEORY_PANEL_W, content_h - 25, "Instrument");
+        grp_instrument_->box(FL_FLAT_BOX); grp_instrument_->color(fl_rgb_color(22,26,35));
+
+        py = content_y + 25 + 4;
+        auto* h_inst = new Fl_Box(px, py, pw, 16, "CHORD KEYBOARD BUILDER");
+        h_inst->labelfont(FL_HELVETICA_BOLD); h_inst->labelsize(9);
+        h_inst->labelcolor(COL_ACCENT); h_inst->box(FL_NO_BOX); py += 20;
+
+        browser_keys_ = new Fl_Browser(px, py, pw, content_h - 120);
+        browser_keys_->color(fl_rgb_color(18, 22, 30));
+        browser_keys_->textcolor(COL_TEXT);
+        browser_keys_->textsize(11); py += content_h - 118;
+
+        btn_add_chord_ = new Fl_Button(px, py, pw, 26, "+ Add Current Chord to Keys");
+    btn_add_chord_->labelsize(10); btn_add_chord_->color(fl_rgb_color(30, 80, 50));
+    btn_add_chord_->callback(cbAddChordToKeys, this); py += 30;
+
+        btn_clear_keys_ = new Fl_Button(px, py, pw, 26, "Clear Keyboard");
+        btn_clear_keys_->labelsize(10); btn_clear_keys_->color(fl_rgb_color(80, 30, 30));
+    btn_clear_keys_->callback(cbClearKeys, this);
+
+        grp_instrument_->end();
+        tabs_right_->end();
     }
 
     // ── STATUS / SPECTRUM BAR (bottom) ────────────────────────────────────────
@@ -523,6 +593,7 @@ void HarmoniaApp::setupCallbacks() {
     sp_edo_->callback(cbEDO, this);
     browser_resolutions_->callback(cbBrowserResolutions, this);
     browser_completion_->callback(cbBrowserCompletion, this);
+    browser_keys_->callback(cbBrowserKeys, this);
     tonnetz_->setNodeClickCallback([this](int pc, int tx, int ty){
         onTonnetzClick(pc, tx, ty);
     });
@@ -1140,6 +1211,139 @@ void HarmoniaApp::cbPsycho(Fl_Widget*, void* d) {
 
 void HarmoniaApp::cbAnalyseEDO(Fl_Widget*, void* d) {
     ((HarmoniaApp*)d)->updateEDOAnalysis();
+}
+
+void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    auto obj = app->audio_->getAbstractObject();
+    auto voices = app->audio_->getVoiceSnapshot();
+
+    if (voices.empty()) return;
+
+    ChordKey ck;
+    ck.name = obj.chord_name != "—" ? obj.chord_name : "Cluster";
+    for (auto& v : voices) {
+        if (v.note_on.load())
+            ck.pcs.push_back(v.pitch_class);
+    }
+
+    // Sort and deduplicate PCs
+    std::sort(ck.pcs.begin(), ck.pcs.end());
+    ck.pcs.erase(std::unique(ck.pcs.begin(), ck.pcs.end()), ck.pcs.end());
+
+    if (ck.pcs.empty()) return;
+
+    app->instrument_keyboard_.push_back(ck);
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "[%d] %s", (int)app->instrument_keyboard_.size(), ck.name.c_str());
+    app->browser_keys_->add(buf);
+}
+
+void HarmoniaApp::cbClearKeys(Fl_Widget*, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    app->instrument_keyboard_.clear();
+    app->browser_keys_->clear();
+}
+
+void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) return;
+
+    if (Fl::event_clicks()) {
+        const auto& ck = app->instrument_keyboard_[line - 1];
+        app->playChord(ck, true);
+    }
+}
+
+void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
+    // Collect active pitch classes to avoid redundant noteOffs
+    std::vector<int> target_pcs = chord.pcs;
+    auto voices = audio_->getVoiceSnapshot();
+
+    // Turn off voices not in the target chord if not sustaining
+    if (!sustain) {
+        for (auto& v : voices) {
+            bool in_target = false;
+            for (int pc : target_pcs) if (v.pitch_class == pc) { in_target = true; break; }
+            if (!in_target) audio_->noteOff(v.id);
+        }
+    }
+
+    for (int pc : target_pcs) {
+        bool found = false;
+        for (auto& v : voices) {
+            if (v.pitch_class == pc) {
+                audio_->noteOn(v.id);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Map to nearest MIDI note
+            double cents = (double)pc * 1200.0 / current_edo_;
+            int closest_midi = 60 + (int)std::round(cents / 100.0);
+            float detune = (float)(cents - (closest_midi - 60) * 100.0);
+
+            // We use the app-level addVoice so it creates the UI strip too
+            addVoice(closest_midi);
+            if (!strips_.empty()) {
+                int newid = strips_.back()->voice_id;
+                audio_->setVoiceDetune(newid, detune);
+                audio_->noteOn(newid);
+                if (auto* s = findStrip(newid)) {
+                    s->sl_detune->value(detune);
+                    s->btn_on->value(1);
+                }
+            }
+        }
+    }
+
+    updateFunctionalAnalysis();
+    updatePsychoAnalysis();
+}
+
+void HarmoniaApp::releaseChord(const ChordKey& chord) {
+    auto voices = audio_->getVoiceSnapshot();
+    for (int pc : chord.pcs) {
+        for (auto& v : voices) {
+            if (v.pitch_class == pc) {
+                audio_->noteOff(v.id);
+                break;
+            }
+        }
+    }
+}
+
+int HarmoniaApp::handle(int event) {
+    if (event == FL_KEYDOWN) {
+        int key = Fl::event_key();
+        if (key >= '1' && key <= '9') {
+            int idx = key - '1';
+            if (idx < (int)instrument_keyboard_.size()) {
+                playChord(instrument_keyboard_[idx], false);
+                return 1;
+            }
+        } else if (key == '0') {
+            if (instrument_keyboard_.size() >= 10) {
+                playChord(instrument_keyboard_[9], false);
+                return 1;
+            }
+        }
+    } else if (event == FL_KEYUP) {
+        int key = Fl::event_key();
+        int idx = -1;
+        if (key >= '1' && key <= '9') idx = key - '1';
+        else if (key == '0') idx = 9;
+
+        if (idx >= 0 && idx < (int)instrument_keyboard_.size()) {
+            releaseChord(instrument_keyboard_[idx]);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
