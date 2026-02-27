@@ -93,7 +93,7 @@ struct Voice {
         harmonic_phase_inc.fill(0.f);
         amplitude = 0.6f;
         attack_ms = 20.f; decay_ms = 80.f; sustain_level = 0.7f; release_ms = 300.f;
-        timbre = TimbrePreset::STRINGS;
+        timbre = TimbrePreset::SINE;
         setTimbre(timbre);
     }
 

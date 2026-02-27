@@ -1268,13 +1268,13 @@ void HarmoniaApp::updatePivotSearch() {
                     snprintf(buf, sizeof(buf), "  [PIVOT] %s = %s",
                              s.roman_as_pivot_from.c_str(), s.roman_as_pivot_to.c_str());
                     browser_pivots_->add(buf);
-                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 100));
+                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 1000));
                 } else {
                     snprintf(buf, sizeof(buf), "  %s (%s in %s)",
                              s.label.c_str(), s.roman.c_str(),
                              (s.key_context=="from" ? res.key_from_name.c_str() : res.key_to_name.c_str()));
                     browser_pivots_->add(buf);
-                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 100));
+                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 1000));
                 }
             }
 
@@ -1359,14 +1359,14 @@ void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
     }
 
     int val = (int)(intptr_t)b->data(line);
-    if (val >= 100) {
-        int pc = val - 100;
+    if (val >= 1000) {
+        int pc = val - 1000;
         app->tonnetz_->setHighlightedPC(pc);
         if (Fl::event_clicks()) {
             app->onTonnetzClick(pc, 0, 0);
         }
     } else {
-        int idx = val;
+        int idx = val - 1;
         if (idx < 0 || idx >= (int)app->last_pivot_res_.all_pivots.size()) {
             app->tonnetz_->setHighlightedPC(-1);
             return;
@@ -1471,15 +1471,26 @@ void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
     HarmoniaApp* app = (HarmoniaApp*)d;
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
-    if (line <= 0) return;
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
     int val = (int)(intptr_t)b->data(line);
-    if (val > 0 && val <= (int)app->instrument_keyboard_.size()) {
+    if (val >= 1000) {
+        int pc = val - 1000;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
+        }
+    } else if (val > 0 && val <= (int)app->instrument_keyboard_.size()) {
         const auto& ck = app->instrument_keyboard_[val - 1];
         if (ck.pcs.size() > 0) app->tonnetz_->setHighlightedPC(ck.pcs[0]);
         if (Fl::event_clicks()) {
             app->playChord(ck, true);
         }
+    } else {
+        app->tonnetz_->setHighlightedPC(-1);
     }
 }
 

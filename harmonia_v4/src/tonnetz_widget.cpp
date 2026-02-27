@@ -334,12 +334,15 @@ void TonnetzWidget::drawNodes() {
         float pr,pg,pb;
         Voice::pcColorHSV(n.pitch_class, edo_, pr,pg,pb);
 
+        bool is_highlighted = std::find(highlighted_pcs_.begin(), highlighted_pcs_.end(), n.pitch_class) != highlighted_pcs_.end();
+
         if (has_voice) {
             // Active voice: bright node with glow
             drawFilledCircle(n.cx, n.cy, 20.f, vr*.3f,vg*.3f,vb*.3f, 0.5f);
             drawFilledCircle(n.cx, n.cy, 18.f, vr,vg,vb, 1.f);
             drawRing(n.cx, n.cy, 22.f, 2.f, 1.f,1.f,1.f, 0.7f);
-        } else if (n.pitch_class == highlighted_pc_) {
+            if (is_highlighted) drawRing(n.cx, n.cy, 25.f, 3.f, 1.f, 1.f, 0.f, 0.9f);
+        } else if (is_highlighted) {
             // Highlighted but inactive
             drawFilledCircle(n.cx, n.cy, 20.f, 1.0f, 1.0f, 0.4f, 0.4f);
             drawFilledCircle(n.cx, n.cy, 16.f, 1.0f, 1.0f, 0.6f, 0.8f);
