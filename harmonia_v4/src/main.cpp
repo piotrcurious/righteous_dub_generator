@@ -149,6 +149,7 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 struct VoiceStrip {
     int voice_id{-1};
+    bool manual{false};
     Fl_Group*       group{nullptr};
     Fl_Light_Button* btn_on{nullptr};
     Fl_Box*          lbl_note{nullptr};
@@ -188,6 +189,7 @@ private:
     Fl_Button*       btn_stop_all_{nullptr};
     Fl_Choice*       ch_key_{nullptr};
     Fl_Spinner*      sp_edo_{nullptr};
+    Fl_Spinner*      sp_base_octave_{nullptr};
     Fl_Value_Slider* sl_master_{nullptr};
     Fl_Output*       out_object_{nullptr};
 
@@ -256,10 +258,11 @@ private:
     void setupCallbacks();
 
     // Voice management
-    void addVoice(int midi_note = 60, TimbrePreset t = TimbrePreset::STRINGS);
+    void addVoice(int midi_note = 60, TimbrePreset t = TimbrePreset::SINE);
     void removeVoice(int voice_id);
     VoiceStrip* findStrip(int voice_id);
     void relayoutStrips();
+    std::vector<VoiceStrip*> pool_strips_;
 
     // Structural theory updates
     void updateFunctionalAnalysis();
@@ -283,6 +286,8 @@ private:
     static void cbAnalyseEDO(Fl_Widget*, void* d);
     static void cbFindPivots(Fl_Widget*, void* d);
     static void cbBrowserPivots(Fl_Widget*, void* d);
+    static void cbBrowserFunction(Fl_Widget*, void* d);
+    static void cbBrowserPsycho(Fl_Widget*, void* d);
 
     // Instrument Builder callbacks
     static void cbAddChordToKeys(Fl_Widget*, void* d);
@@ -346,9 +351,9 @@ void HarmoniaApp::run() {
     }
 
     // ── seed with a C major chord
-    addVoice(60, TimbrePreset::STRINGS);  // C4
-    addVoice(64, TimbrePreset::STRINGS);  // E4
-    addVoice(67, TimbrePreset::STRINGS);  // G4
+    addVoice(60, TimbrePreset::SINE);  // C4
+    addVoice(64, TimbrePreset::SINE);  // E4
+    addVoice(67, TimbrePreset::SINE);  // G4
 
     // ── play them
     for (auto& s : strips_) audio_->noteOn(s->voice_id);
@@ -402,9 +407,14 @@ void HarmoniaApp::buildUI() {
         ch_key_->value(0); x += 76;
 
         new Fl_Box(x,y,30,bh,"EDO:"); x+=32;
-        sp_edo_ = new Fl_Spinner(x,y,60,bh);
+        sp_edo_ = new Fl_Spinner(x,y,50,bh);
         sp_edo_->minimum(5); sp_edo_->maximum(72); sp_edo_->value(12);
-        x += 68;
+        x += 56;
+
+        new Fl_Box(x,y,30,bh,"Oct:"); x+=32;
+        sp_base_octave_ = new Fl_Spinner(x,y,45,bh);
+        sp_base_octave_->minimum(0); sp_base_octave_->maximum(8); sp_base_octave_->value(4);
+        x += 50;
 
         new Fl_Box(x,y,50,bh,"Master:"); x+=52;
         sl_master_ = new Fl_Value_Slider(x,y,100,bh);
@@ -485,7 +495,7 @@ void HarmoniaApp::buildUI() {
         // Set callback inline so it cannot be missed by setupCallbacks()
         btn_analyze_ = new Fl_Button(px,py,pw,20,"Analyse chord structure");
         btn_analyze_->labelsize(9); btn_analyze_->color(fl_rgb_color(30,50,80));
-        btn_analyze_->callback(cbAnalyze, this); py+=24;
+        py+=24;
 
         // ─ Resolution Paths
         auto* h2 = new Fl_Box(px,py,pw,16,"RESOLUTION PATHS");
@@ -498,7 +508,7 @@ void HarmoniaApp::buildUI() {
 
         btn_resolve_ = new Fl_Button(px,py,pw,20,"Show resolution paths");
         btn_resolve_->labelsize(9); btn_resolve_->color(fl_rgb_color(50,30,20));
-        btn_resolve_->callback(cbResolve, this); py+=24;
+        py+=24;
 
         // ─ Voice Completion
         auto* h3 = new Fl_Box(px,py,pw,16,"COMPLETION SUGGESTIONS");
@@ -511,7 +521,7 @@ void HarmoniaApp::buildUI() {
 
         btn_complete_ = new Fl_Button(px,py,pw,20,"Suggest next voice");
         btn_complete_->labelsize(9); btn_complete_->color(fl_rgb_color(20,50,30));
-        btn_complete_->callback(cbSuggestCompletion, this); py+=24;
+        py+=24;
 
         // ─ Psychoacoustic Neural Model
         auto* h5 = new Fl_Box(px,py,pw,16,"AUDITORY CORTEX MODEL");
@@ -524,7 +534,7 @@ void HarmoniaApp::buildUI() {
 
         btn_psycho_ = new Fl_Button(px,py,pw,20,"Neural psychoanalysis");
         btn_psycho_->labelsize(9); btn_psycho_->color(fl_rgb_color(60,20,60));
-        btn_psycho_->callback(cbPsycho, this); py+=24;
+        py+=24;
 
         // ─ Orbifold distance
         out_orbifold_ = new Fl_Output(px,py,pw,30);
@@ -543,7 +553,6 @@ void HarmoniaApp::buildUI() {
 
         btn_edo_ = new Fl_Button(px,py,pw,22,"Analyse EDO");
         btn_edo_->labelsize(9); btn_edo_->color(fl_rgb_color(40,25,70));
-        btn_edo_->callback(cbAnalyseEDO, this);
 
         grp_theory_->end();
 
@@ -622,14 +631,25 @@ void HarmoniaApp::buildUI() {
 // ─────────────────────────────────────────────────────────────────────────────
 void HarmoniaApp::setupCallbacks() {
     btn_add_->callback(cbAddVoice, this);
+    btn_analyze_->callback(cbAnalyze, this);
+    btn_resolve_->callback(cbResolve, this);
+    btn_complete_->callback(cbSuggestCompletion, this);
+    btn_psycho_->callback(cbPsycho, this);
+    btn_edo_->callback(cbAnalyseEDO, this);
+    btn_find_pivots_->callback(cbFindPivots, this);
     btn_play_all_->callback(cbPlayAll, this);
     btn_stop_all_->callback(cbStopAll, this);
     sl_master_->callback(cbMasterVol, this);
     ch_key_->callback(cbKey, this);
     sp_edo_->callback(cbEDO, this);
+
+    browser_function_->callback(cbBrowserFunction, this);
     browser_resolutions_->callback(cbBrowserResolutions, this);
     browser_completion_->callback(cbBrowserCompletion, this);
+    browser_psycho_->callback(cbBrowserPsycho, this);
+    browser_pivots_->callback(cbBrowserPivots, this);
     browser_keys_->callback(cbBrowserKeys, this);
+
     tonnetz_->setNodeClickCallback([this](int pc, int tx, int ty){
         onTonnetzClick(pc, tx, ty);
     });
@@ -645,90 +665,95 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
     static const int STRIP_H = 76;
     int sw = VOICE_PANEL_W - 12;
 
-    scroll_voices_->begin();
-    VoiceStrip* strip = new VoiceStrip();
+    VoiceStrip* strip = nullptr;
+    if (!pool_strips_.empty()) {
+        strip = pool_strips_.back();
+        pool_strips_.pop_back();
+        strip->group->show();
+        scroll_voices_->add(strip->group);
+    } else {
+        scroll_voices_->begin();
+        strip = new VoiceStrip();
+        // Initial position doesn't matter much as relayoutStrips() will fix it
+        int gx = scroll_voices_->x() + 4;
+        int gy = scroll_voices_->y() + 4;
+        strip->group = new Fl_Group(gx, gy, sw, STRIP_H);
+        strip->group->box(FL_FLAT_BOX);
+        strip->group->color(fl_rgb_color(28,32,44));
+
+        // ── Row 1: colour bar + note name + mute + remove ──────────────────
+        Fl_Box* colorbar = new Fl_Box(gx, gy, 4, STRIP_H, "");
+        colorbar->box(FL_FLAT_BOX);
+        colorbar->color(fl_rgb_color(80,120,200));
+
+        strip->lbl_note = new Fl_Box(gx+6, gy+4, 60, 26, "—");
+        strip->lbl_note->box(FL_FLAT_BOX);
+        strip->lbl_note->color(fl_rgb_color(18,22,32));
+        strip->lbl_note->labelcolor(fl_rgb_color(200,220,255));
+        strip->lbl_note->labelfont(FL_HELVETICA_BOLD);
+        strip->lbl_note->labelsize(15);
+        strip->lbl_note->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+
+        strip->roughness_box = new Fl_Box(gx+70, gy+4, 46, 13, "R:0.00");
+        strip->roughness_box->box(FL_FLAT_BOX);
+        strip->roughness_box->color(fl_rgb_color(20,26,36));
+        strip->roughness_box->labelcolor(fl_rgb_color(160,200,140));
+        strip->roughness_box->labelsize(8);
+
+        strip->btn_on = new Fl_Light_Button(gx+70, gy+18, 46, 14, "PLAY");
+        strip->btn_on->labelsize(8);
+        strip->btn_on->selection_color(fl_rgb_color(40,180,80));
+        strip->btn_on->callback(cbVoiceOn, this);
+
+        strip->btn_remove = new Fl_Button(gx+sw-22, gy+4, 18, 18, "×");
+        strip->btn_remove->labelsize(12);
+        strip->btn_remove->box(FL_FLAT_BOX);
+        strip->btn_remove->color(fl_rgb_color(60,18,18));
+        strip->btn_remove->labelcolor(fl_rgb_color(220,80,80));
+        strip->btn_remove->callback(cbVoiceRemove, this);
+
+        strip->ch_timbre = new Fl_Choice(gx+118, gy+4, sw-142, 18);
+        strip->ch_timbre->textsize(9);
+        strip->ch_timbre->add("Sine|Saw|Square|Strings|Brass|Flute");
+        strip->ch_timbre->callback(cbVoiceTimbre, this);
+
+        // ── Row 2: Amp slider ───────────────────────────────────────────────
+        auto* lbl_a = new Fl_Box(gx+6, gy+36, 22, 12, "Vol");
+        lbl_a->labelsize(8); lbl_a->labelcolor(fl_rgb_color(140,150,170)); lbl_a->box(FL_NO_BOX);
+        strip->sl_amp = new Fl_Value_Slider(gx+30, gy+36, sw-34, 13);
+        strip->sl_amp->type(FL_HORIZONTAL);
+        strip->sl_amp->minimum(0); strip->sl_amp->maximum(1);
+        strip->sl_amp->textsize(8);
+        strip->sl_amp->color(fl_rgb_color(22,26,38));
+        strip->sl_amp->selection_color(fl_rgb_color(40,100,180));
+        strip->sl_amp->callback(cbVoiceAmp, this);
+
+        // ── Row 3: Detune slider ────────────────────────────────────────────
+        auto* lbl_d = new Fl_Box(gx+6, gy+56, 22, 12, "Det");
+        lbl_d->labelsize(8); lbl_d->labelcolor(fl_rgb_color(140,150,170)); lbl_d->box(FL_NO_BOX);
+        strip->sl_detune = new Fl_Value_Slider(gx+30, gy+56, sw-34, 13);
+        strip->sl_detune->type(FL_HORIZONTAL);
+        strip->sl_detune->minimum(-50); strip->sl_detune->maximum(50);
+        strip->sl_detune->textsize(8);
+        strip->sl_detune->color(fl_rgb_color(22,26,38));
+        strip->sl_detune->selection_color(fl_rgb_color(100,60,160));
+        strip->sl_detune->callback(cbVoiceDetune, this);
+
+        strip->group->end();
+        scroll_voices_->end();
+    }
+
     strip->voice_id = id;
-
-    // Initial position doesn't matter much as relayoutStrips() will fix it
-    int gx = scroll_voices_->x() + 4;
-    int gy = scroll_voices_->y() + 4;
-    strip->group = new Fl_Group(gx, gy, sw, STRIP_H);
-    strip->group->box(FL_FLAT_BOX);
-    strip->group->color(fl_rgb_color(28,32,44));
-
-    // ── Row 1: colour bar + note name + mute + remove ──────────────────
-    // Thin colour accent bar on left edge
-    Fl_Box* colorbar = new Fl_Box(gx, gy, 4, STRIP_H, "");
-    colorbar->box(FL_FLAT_BOX);
-    colorbar->color(fl_rgb_color(80,120,200));
-
-    // Note name — large and readable
-    strip->lbl_note = new Fl_Box(gx+6, gy+4, 60, 26, "—");
-    strip->lbl_note->box(FL_FLAT_BOX);
-    strip->lbl_note->color(fl_rgb_color(18,22,32));
-    strip->lbl_note->labelcolor(fl_rgb_color(200,220,255));
-    strip->lbl_note->labelfont(FL_HELVETICA_BOLD);
-    strip->lbl_note->labelsize(15);
-    strip->lbl_note->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
-
-    // Roughness indicator — compact pill next to note name
-    strip->roughness_box = new Fl_Box(gx+70, gy+4, 46, 13, "R:0.00");
-    strip->roughness_box->box(FL_FLAT_BOX);
-    strip->roughness_box->color(fl_rgb_color(20,26,36));
-    strip->roughness_box->labelcolor(fl_rgb_color(160,200,140));
-    strip->roughness_box->labelsize(8);
-
-    // Mute/unmute (light button, green when active)
-    strip->btn_on = new Fl_Light_Button(gx+70, gy+18, 46, 14, "PLAY");
-    strip->btn_on->labelsize(8);
-    strip->btn_on->value(0);
-    strip->btn_on->selection_color(fl_rgb_color(40,180,80));
+    strip->manual   = false;
     strip->btn_on->user_data((void*)(intptr_t)id);
-    strip->btn_on->callback(cbVoiceOn, this);
-
-    // Remove button — right-aligned, small
-    strip->btn_remove = new Fl_Button(gx+sw-22, gy+4, 18, 18, "×");
-    strip->btn_remove->labelsize(12);
-    strip->btn_remove->box(FL_FLAT_BOX);
-    strip->btn_remove->color(fl_rgb_color(60,18,18));
-    strip->btn_remove->labelcolor(fl_rgb_color(220,80,80));
+    strip->btn_on->value(0);
     strip->btn_remove->user_data((void*)(intptr_t)id);
-    strip->btn_remove->callback(cbVoiceRemove, this);
-
-    // Timbre dropdown — spans top right area
-    strip->ch_timbre = new Fl_Choice(gx+118, gy+4, sw-142, 18);
-    strip->ch_timbre->textsize(9);
-    strip->ch_timbre->add("Sine|Saw|Square|Strings|Brass|Flute");
-    strip->ch_timbre->value(3);
     strip->ch_timbre->user_data((void*)(intptr_t)id);
-    strip->ch_timbre->callback(cbVoiceTimbre, this);
-
-    // ── Row 2: Amp slider ───────────────────────────────────────────────
-    auto* lbl_a = new Fl_Box(gx+6, gy+36, 22, 12, "Vol");
-    lbl_a->labelsize(8); lbl_a->labelcolor(fl_rgb_color(140,150,170)); lbl_a->box(FL_NO_BOX);
-    strip->sl_amp = new Fl_Value_Slider(gx+30, gy+36, sw-34, 13);
-    strip->sl_amp->type(FL_HORIZONTAL);
-    strip->sl_amp->minimum(0); strip->sl_amp->maximum(1); strip->sl_amp->value(0.6);
-    strip->sl_amp->textsize(8);
-    strip->sl_amp->color(fl_rgb_color(22,26,38));
-    strip->sl_amp->selection_color(fl_rgb_color(40,100,180));
+    strip->ch_timbre->value((int)t);
     strip->sl_amp->user_data((void*)(intptr_t)id);
-    strip->sl_amp->callback(cbVoiceAmp, this);
-
-    // ── Row 3: Detune slider ────────────────────────────────────────────
-    auto* lbl_d = new Fl_Box(gx+6, gy+56, 22, 12, "Det");
-    lbl_d->labelsize(8); lbl_d->labelcolor(fl_rgb_color(140,150,170)); lbl_d->box(FL_NO_BOX);
-    strip->sl_detune = new Fl_Value_Slider(gx+30, gy+56, sw-34, 13);
-    strip->sl_detune->type(FL_HORIZONTAL);
-    strip->sl_detune->minimum(-50); strip->sl_detune->maximum(50); strip->sl_detune->value(0);
-    strip->sl_detune->textsize(8);
-    strip->sl_detune->color(fl_rgb_color(22,26,38));
-    strip->sl_detune->selection_color(fl_rgb_color(100,60,160));
+    strip->sl_amp->value(0.6);
     strip->sl_detune->user_data((void*)(intptr_t)id);
-    strip->sl_detune->callback(cbVoiceDetune, this);
-
-    strip->group->end();
-    scroll_voices_->end();
+    strip->sl_detune->value(0);
 
     // Update note label and voice colour
     auto voices = audio_->getVoiceSnapshot();
@@ -738,13 +763,9 @@ void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
             char buf[16];
             snprintf(buf,sizeof(buf),"%s%d", NOTE_NAMES[v.pitch_class], v.octave);
             strip->lbl_note->copy_label(buf);
-            // Tint: group bg slightly, colour bar fully
-            Fl_Color accent = fl_rgb_color(
-                (uchar)(v.color[0]*200), (uchar)(v.color[1]*200), (uchar)(v.color[2]*200));
+            Fl_Color accent = fl_rgb_color((uchar)(v.color[0]*200), (uchar)(v.color[1]*200), (uchar)(v.color[2]*200));
             strip->group->color(flColor(v.color[0]*0.12f, v.color[1]*0.12f, v.color[2]*0.12f));
-            // The first child of group is the colour bar
-            if (strip->group->children() > 0)
-                strip->group->child(0)->color(accent);
+            if (strip->group->children() > 0) strip->group->child(0)->color(accent);
         }
     }
 
@@ -762,17 +783,11 @@ void HarmoniaApp::removeVoice(int voice_id) {
     if (it == strips_.end()) return;
 
     VoiceStrip* strip = *it;
-    strips_.erase(it);   // remove from our list first
+    strips_.erase(it);
 
-    // Hide the group immediately so it disappears on the next redraw.
-    // Then detach from scroll's child list and queue the actual deletion.
-    // This sequence is safe even when called from the × button's own callback
-    // because Fl::delete_widget() defers destruction to after event dispatch.
     strip->group->hide();
     scroll_voices_->remove(strip->group);
-    Fl::delete_widget(strip->group);  // FLTK now owns and will free
-    strip->group = nullptr;
-    delete strip;                     // free our wrapper (no FLTK widgets inside)
+    pool_strips_.push_back(strip);
 
     relayoutStrips();
     win_->redraw();
@@ -869,12 +884,20 @@ void HarmoniaApp::onIdle(void* data) {
     if (changed) app->scroll_voices_->redraw();
 
     // Sync PLAY button visual state with actual note_on state
+    // AND prune idle voices to keep the UI clean
+    std::vector<int> to_prune;
     for (auto& v : voices) {
         if (auto* s = app->findStrip(v.id)) {
             int want = v.note_on.load() ? 1 : 0;
             if (s->btn_on->value() != want) s->btn_on->value(want);
+
+            // Prune if idle and NOT manually placed or toggled
+            if (v.env_stage == Voice::EnvStage::IDLE && !v.note_on.load() && !s->manual) {
+                to_prune.push_back(v.id);
+            }
         }
     }
+    for (int id : to_prune) app->removeVoice(id);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -882,9 +905,10 @@ void HarmoniaApp::onIdle(void* data) {
 // ─────────────────────────────────────────────────────────────────────────────
 void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
     // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
+    int base_octave = (int)sp_base_octave_->value();
     double cents = (double)pitch_class * 1200.0 / current_edo_;
-    int closest_midi = 60 + (int)std::round(cents / 100.0);
-    float detune = (float)(cents - (closest_midi - 60) * 100.0);
+    int closest_midi = base_octave * 12 + 12 + (int)std::round(cents / 100.0);
+    float detune = (float)(cents - (closest_midi - (base_octave * 12 + 12)) * 100.0);
 
     last_clicked_root_ = pitch_class;
     auto voices = audio_->getVoiceSnapshot();
@@ -901,11 +925,13 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
     } else {
         addVoice(closest_midi);
         if (!strips_.empty()) {
-            int newid = strips_.back()->voice_id;
+            VoiceStrip* s = strips_.back();
+            s->manual = true; // Manually placed notes stay until removed
+            int newid = s->voice_id;
             audio_->setVoiceDetune(newid, detune);
-            if (auto* s = findStrip(newid)) {
-                s->sl_detune->value(detune);
-                s->btn_on->value(1);
+            if (auto* fs = findStrip(newid)) {
+                fs->sl_detune->value(detune);
+                fs->btn_on->value(1);
             }
             audio_->noteOn(newid);
         }
@@ -962,6 +988,14 @@ void HarmoniaApp::updateFunctionalAnalysis() {
                          fa.tritone_names.size()>=2
                              ? fa.tritone_names[1].c_str() : "?");
                 browser_function_->add(buf);
+                browser_function_->data(browser_function_->size(), (void*)(intptr_t)(fa.tritone[0]+1000));
+
+                for (size_t i=0; i<fa.tritone.size(); i++) {
+                    char nbuf[64];
+                    snprintf(nbuf, sizeof(nbuf), "    • %s", fa.tritone_names[i].c_str());
+                    browser_function_->add(nbuf);
+                    browser_function_->data(browser_function_->size(), (void*)(intptr_t)(fa.tritone[i]+1000));
+                }
             }
 
             // ── Tendency tones
@@ -972,6 +1006,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
                              t.name.c_str(), t.role.c_str(),
                              t.tendency.c_str(), t.force.c_str());
                     browser_function_->add(buf);
+                    browser_function_->data(browser_function_->size(), (void*)(intptr_t)(t.pc+1000));
                 }
             }
 
@@ -1043,7 +1078,7 @@ void HarmoniaApp::updateResolutionPaths() {
                          rp.voice_leading.smoothness.c_str(),
                          rp.voice_leading.distance);
                 browser_resolutions_->add(buf);
-                browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
+                browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)(path_idx + 1));
 
                 // Explanation (word-wrapped)
                 std::string ex = rp.explanation;
@@ -1056,7 +1091,7 @@ void HarmoniaApp::updateResolutionPaths() {
                     snprintf(buf,sizeof(buf),"   %s->%s (%+d)",
                              m.from_name.c_str(), m.to_name.c_str(), m.semitones);
                     browser_resolutions_->add(buf);
-                    browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)path_idx);
+                    browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)(m.to_pc + 1000));
                 }
                 browser_resolutions_->add(" ");
                 path_idx++;
@@ -1083,12 +1118,12 @@ void HarmoniaApp::updateCompletionSuggestions() {
                          s.roughness_delta,
                          s.in_key ? "(diatonic)" : "(chromatic)");
                 browser_completion_->add(buf);
-                browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
+                browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc + 1000));
 
                 // Structural reasons
                 for (auto& r : s.structural_reasons) {
                     browser_completion_->add(("   " + r).c_str());
-                    browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)s.pc);
+                    browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc + 1000));
                 }
                 if (!s.structural_reasons.empty())
                     browser_completion_->add(" ");
@@ -1131,6 +1166,10 @@ void HarmoniaApp::updatePsychoAnalysis() {
             snprintf(buf, sizeof(buf), "  Virtual Root: %s (%.2fHz)",
                      pa.level2.virtual_pitch_name.c_str(), pa.level2.virtual_pitch_hz);
             browser_psycho_->add(buf);
+            int vpc = (int)std::round(12.0 * std::log2(pa.level2.virtual_pitch_hz / 261.63)) % 12;
+            if (vpc < 0) vpc += 12;
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)(vpc + 1000));
+
             snprintf(buf, sizeof(buf), "  Harmonicity: %s (%.2f)",
                      pa.level2.harmonicity_label.c_str(), pa.level2.harmonicity);
             browser_psycho_->add(buf);
@@ -1206,10 +1245,18 @@ void HarmoniaApp::updatePivotSearch() {
                 snprintf(buf, sizeof(buf), "@C4[%d] %s: %s -> %s",
                          idx, p.label.c_str(), p.roman_from.c_str(), p.roman_to.c_str());
                 browser_pivots_->add(buf);
-                browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)idx);
-                snprintf(buf, sizeof(buf), "   Score: %.2f  (%s)", p.pivot_score, p.type.c_str());
+                browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(idx + 1));
+
+                for (int pc : p.pcs) {
+                    char nbuf[64];
+                    snprintf(nbuf, sizeof(nbuf), "    • %s", NOTE_NAMES[pc%12]);
+                    browser_pivots_->add(nbuf);
+                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(pc + 1000));
+                }
+
+                snprintf(buf, sizeof(buf), "      Score: %.2f  (%s)", p.pivot_score, p.type.c_str());
                 browser_pivots_->add(buf);
-                browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)idx);
+                browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(idx + 1));
                 idx++;
                 if (idx > 5) break;
             }
@@ -1220,12 +1267,15 @@ void HarmoniaApp::updatePivotSearch() {
                 if (s.key_context == "pivot") {
                     snprintf(buf, sizeof(buf), "  [PIVOT] %s = %s",
                              s.roman_as_pivot_from.c_str(), s.roman_as_pivot_to.c_str());
+                    browser_pivots_->add(buf);
+                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 100));
                 } else {
                     snprintf(buf, sizeof(buf), "  %s (%s in %s)",
                              s.label.c_str(), s.roman.c_str(),
                              (s.key_context=="from" ? res.key_from_name.c_str() : res.key_to_name.c_str()));
+                    browser_pivots_->add(buf);
+                    browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)(s.root + 100));
                 }
-                browser_pivots_->add(buf);
             }
 
             browser_pivots_->redraw();
@@ -1303,19 +1353,75 @@ void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
     HarmoniaApp* app = (HarmoniaApp*)d;
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
-    if (line <= 0) return;
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
 
-    int idx = (int)(intptr_t)b->data(line);
-    if (idx < 0 || idx >= (int)app->last_pivot_res_.all_pivots.size()) return;
+    int val = (int)(intptr_t)b->data(line);
+    if (val >= 100) {
+        int pc = val - 100;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
+        }
+    } else {
+        int idx = val;
+        if (idx < 0 || idx >= (int)app->last_pivot_res_.all_pivots.size()) {
+            app->tonnetz_->setHighlightedPC(-1);
+            return;
+        }
 
-    const auto& p = app->last_pivot_res_.all_pivots[idx];
-    app->tonnetz_->setHighlightedPC(p.root);
+        const auto& p = app->last_pivot_res_.all_pivots[idx];
+        app->tonnetz_->setHighlightedPC(p.root);
 
-    if (Fl::event_clicks()) {
-        ChordKey ck;
-        ck.name = p.label;
-        ck.pcs  = p.pcs;
-        app->playChord(ck, true);
+        if (Fl::event_clicks()) {
+            ChordKey ck;
+            ck.name = p.label;
+            ck.pcs  = p.pcs;
+            app->playChord(ck, true);
+        }
+    }
+}
+
+void HarmoniaApp::cbBrowserFunction(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
+
+    int data = (int)(intptr_t)b->data(line);
+    if (data >= 1000) {
+        int pc = data - 1000;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
+        }
+    } else {
+        app->tonnetz_->setHighlightedPC(-1);
+    }
+}
+
+void HarmoniaApp::cbBrowserPsycho(Fl_Widget* w, void* d) {
+    HarmoniaApp* app = (HarmoniaApp*)d;
+    Fl_Browser* b = (Fl_Browser*)w;
+    int line = b->value();
+    if (line <= 0) {
+        app->tonnetz_->setHighlightedPC(-1);
+        return;
+    }
+    int data = (int)(intptr_t)b->data(line);
+    if (data >= 1000) {
+        int pc = data - 1000;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
+        }
+    } else {
+        app->tonnetz_->setHighlightedPC(-1);
     }
 }
 
@@ -1342,8 +1448,17 @@ void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
     app->instrument_keyboard_.push_back(ck);
 
     char buf[128];
-    snprintf(buf, sizeof(buf), "[%d] %s", (int)app->instrument_keyboard_.size(), ck.name.c_str());
+    int kidx = (int)app->instrument_keyboard_.size();
+    snprintf(buf, sizeof(buf), "[%d] %s", kidx, ck.name.c_str());
     app->browser_keys_->add(buf);
+    app->browser_keys_->data(app->browser_keys_->size(), (void*)(intptr_t)kidx);
+
+    for (int pc : ck.pcs) {
+        char nbuf[64];
+        snprintf(nbuf, sizeof(nbuf), "    • %s", NOTE_NAMES[pc%12]);
+        app->browser_keys_->add(nbuf);
+        app->browser_keys_->data(app->browser_keys_->size(), (void*)(intptr_t)(pc + 1000));
+    }
 }
 
 void HarmoniaApp::cbClearKeys(Fl_Widget*, void* d) {
@@ -1358,9 +1473,13 @@ void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
     int line = b->value();
     if (line <= 0) return;
 
-    if (Fl::event_clicks()) {
-        const auto& ck = app->instrument_keyboard_[line - 1];
-        app->playChord(ck, true);
+    int val = (int)(intptr_t)b->data(line);
+    if (val > 0 && val <= (int)app->instrument_keyboard_.size()) {
+        const auto& ck = app->instrument_keyboard_[val - 1];
+        if (ck.pcs.size() > 0) app->tonnetz_->setHighlightedPC(ck.pcs[0]);
+        if (Fl::event_clicks()) {
+            app->playChord(ck, true);
+        }
     }
 }
 
@@ -1389,9 +1508,10 @@ void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
         }
         if (!found) {
             // Map to nearest MIDI note
+            int base_octave = (int)sp_base_octave_->value();
             double cents = (double)pc * 1200.0 / current_edo_;
-            int closest_midi = 60 + (int)std::round(cents / 100.0);
-            float detune = (float)(cents - (closest_midi - 60) * 100.0);
+            int closest_midi = base_octave * 12 + 12 + (int)std::round(cents / 100.0);
+            float detune = (float)(cents - (closest_midi - (base_octave * 12 + 12)) * 100.0);
 
             // We use the app-level addVoice so it creates the UI strip too
             addVoice(closest_midi);
@@ -1461,39 +1581,29 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
         return;
     }
 
-    int path_idx = (int)(intptr_t)b->data(line);
-    if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) {
-        app->tonnetz_->setHighlightedPC(-1);
-        return;
-    }
-
-    const auto& rp = app->last_resolutions_[path_idx];
-    app->tonnetz_->setHighlightedPC(rp.target_root);
-
-    // Highlight nodes for the target chord
-    if (Fl::event_clicks()) {
-        for (int pc : rp.target_pcs) {
-            // Add voice if not present
-            bool present = false;
-            auto voices = app->audio_->getVoiceSnapshot();
-            for (auto& v : voices) if (v.pitch_class == pc) { present = true; break; }
-            if (!present) {
-                double cents = (double)pc * 1200.0 / app->current_edo_;
-                int closest_midi = 60 + (int)std::round(cents / 100.0);
-                float detune = (float)(cents - (closest_midi - 60) * 100.0);
-
-                app->addVoice(closest_midi);
-                if (!app->strips_.empty()) {
-                    int newid = app->strips_.back()->voice_id;
-                    app->audio_->setVoiceDetune(newid, detune);
-                    if (auto* s = app->findStrip(newid)) {
-                        s->sl_detune->value(detune);
-                        s->btn_on->value(1);
-                    }
-                    app->audio_->noteOn(newid);
-                }
-            }
+    int val = (int)(intptr_t)b->data(line);
+    if (val >= 1000) {
+        int pc = val - 1000;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
         }
+    } else if (val > 0) {
+        int path_idx = val - 1;
+        if (path_idx < 0 || path_idx >= (int)app->last_resolutions_.size()) {
+            app->tonnetz_->setHighlightedPC(-1);
+            return;
+        }
+        const auto& rp = app->last_resolutions_[path_idx];
+        app->tonnetz_->setHighlightedPC(rp.target_root);
+        if (Fl::event_clicks()) {
+            ChordKey ck;
+            ck.name = rp.target_label;
+            ck.pcs = rp.target_pcs;
+            app->playChord(ck, true);
+        }
+    } else {
+        app->tonnetz_->setHighlightedPC(-1);
     }
 }
 
@@ -1506,17 +1616,15 @@ void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
         return;
     }
 
-    int pc = (int)(intptr_t)b->data(line);
-    if (pc < 0) {
+    int data = (int)(intptr_t)b->data(line);
+    if (data >= 1000) {
+        int pc = data - 1000;
+        app->tonnetz_->setHighlightedPC(pc);
+        if (Fl::event_clicks()) {
+            app->onTonnetzClick(pc, 0, 0);
+        }
+    } else {
         app->tonnetz_->setHighlightedPC(-1);
-        return;
-    }
-
-    app->tonnetz_->setHighlightedPC(pc);
-
-    // Single click for highlighting (already done above), double click to add
-    if (Fl::event_clicks()) {
-        app->onTonnetzClick(pc, 0, 0);
     }
 }
 
