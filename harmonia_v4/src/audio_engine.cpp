@@ -139,6 +139,14 @@ void AudioEngine::setVoiceFrequency(int voice_id, double hz) {
     for (auto& v : voices_) if (v.id == voice_id) { v.setFrequency(hz); break; }
 }
 
+void AudioEngine::setVoiceTonnetzCoords(int voice_id, int tx, int ty) {
+    std::lock_guard<std::mutex> lk(voices_mutex_);
+    for (auto& v : voices_) if (v.id == voice_id) {
+        v.tonnetz_x = tx; v.tonnetz_y = ty;
+        break;
+    }
+}
+
 void AudioEngine::setVoiceAmplitude(int voice_id, float amp) {
     std::lock_guard<std::mutex> lk(voices_mutex_);
     for (auto& v : voices_) if (v.id == voice_id) { v.amplitude = amp; break; }
@@ -154,7 +162,7 @@ void AudioEngine::setVoiceDetune(int voice_id, float cents) {
     for (auto& v : voices_) if (v.id == voice_id) {
         v.detune_cents = cents;
         v.edo = edo_.load();
-        v.setFrequency(v.frequency);
+        v.setFrequency(v.frequency, false);
         Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
         break;
     }
@@ -185,7 +193,7 @@ void AudioEngine::setEDO(int edo) {
     std::lock_guard<std::mutex> lk(voices_mutex_);
     for (auto& v : voices_) {
         v.edo = edo;
-        v.setFrequency(v.frequency); // re-calculate pitch_class
+        v.setFrequency(v.frequency, false); // re-calculate pitch_class, keep coords
         Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
     }
 }

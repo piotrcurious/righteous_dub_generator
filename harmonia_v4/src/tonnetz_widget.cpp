@@ -238,19 +238,19 @@ void TonnetzWidget::drawTriads() {
             auto* d = findNode(gx+1, gy+1);
             if (!a||!b||!c) continue;
 
-            // Check if any voice is active with matching pitch classes
-            auto voiceActive = [&](int pc) {
-                for (auto& v : voices_) if (v.active && v.pitch_class==pc) return true;
+            // Check if any voice is active at specific coordinates
+            auto voiceAt = [&](int tx, int ty) {
+                for (auto& v : voices_) if (v.active && v.tonnetz_x == tx && v.tonnetz_y == ty) return true;
                 return false;
             };
 
-            bool maj_lit = voiceActive(a->pitch_class) && voiceActive(b->pitch_class) && voiceActive(c->pitch_class);
+            bool maj_lit = voiceAt(a->x, a->y) && voiceAt(b->x, b->y) && voiceAt(c->x, c->y);
             float alpha = maj_lit ? 0.55f : 0.08f;
             float pr,pg,pb; Voice::pcColorHSV(a->pitch_class, edo_, pr,pg,pb);
             drawTriangle(a->cx,a->cy, b->cx,b->cy, c->cx,c->cy, pr,pg,pb, alpha);
 
             if (!d) continue;
-            bool min_lit = voiceActive(b->pitch_class) && voiceActive(c->pitch_class) && voiceActive(d->pitch_class);
+            bool min_lit = voiceAt(b->x, b->y) && voiceAt(c->x, c->y) && voiceAt(d->x, d->y);
             alpha = min_lit ? 0.45f : 0.06f;
             Voice::pcColorHSV(c->pitch_class, edo_, pr,pg,pb);
             drawTriangle(b->cx,b->cy, c->cx,c->cy, d->cx,d->cy, pr*0.6f,pg*0.6f,pb*0.6f, alpha);
@@ -322,12 +322,13 @@ void TonnetzWidget::drawNodes() {
     gl_font(FL_HELVETICA, 11);
 
     for (auto& n : nodes_) {
-        // Is any voice playing this pitch class?
+        // Is any voice playing at this exact lattice position?
         bool has_voice = false;
         float vr=0,vg=0,vb=0;
         for (auto& v : voices_) {
-            if (v.active && v.pitch_class == n.pitch_class) {
+            if (v.active && v.tonnetz_x == n.x && v.tonnetz_y == n.y) {
                 has_voice = true; vr=v.color[0]; vg=v.color[1]; vb=v.color[2];
+                break;
             }
         }
 

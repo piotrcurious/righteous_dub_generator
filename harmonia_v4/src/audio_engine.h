@@ -68,6 +68,7 @@ public:
     void noteOn(int voice_id);
     void noteOff(int voice_id);
     void setVoiceFrequency(int voice_id, double hz);
+    void setVoiceTonnetzCoords(int voice_id, int tx, int ty);
     void setVoiceAmplitude(int voice_id, float amp);
     void setVoiceTimbre(int voice_id, TimbrePreset t);
     void setVoiceDetune(int voice_id, float cents);

@@ -142,7 +142,7 @@ struct Voice {
     Voice& operator=(Voice&& o) noexcept { return operator=(o); }
 
     // ────── set frequency and recompute phase increments
-    void setFrequency(double freq) {
+    void setFrequency(double freq, bool update_coords = true) {
         frequency = freq;
         double f_actual = freq * std::pow(2.0, detune_cents / 1200.0);
         for (int k = 1; k <= MAX_HARMONICS; k++) {
@@ -155,7 +155,7 @@ struct Voice {
         logf = logf - std::floor(logf); // mod octave
         pitch_class = (int)std::round(logf * edo) % edo;
 
-        computeTonnetzCoords();
+        if (update_coords) computeTonnetzCoords();
     }
 
     // ────── set pitch by MIDI note number

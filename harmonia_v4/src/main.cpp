@@ -258,7 +258,7 @@ private:
     void setupCallbacks();
 
     // Voice management
-    void addVoice(int midi_note = 60, TimbrePreset t = TimbrePreset::SINE);
+    void addVoice(int midi_note = 60, TimbrePreset t = TimbrePreset::SINE, int tx = -100, int ty = -100);
     void removeVoice(int voice_id);
     VoiceStrip* findStrip(int voice_id);
     void relayoutStrips();
@@ -490,7 +490,9 @@ void HarmoniaApp::buildUI() {
 
         browser_function_ = new Fl_Browser(px,py,pw,130);
         browser_function_->textsize(9); browser_function_->color(fl_rgb_color(18,22,30));
-        browser_function_->textcolor(COL_TEXT); py+=132;
+        browser_function_->textcolor(COL_TEXT);
+        browser_function_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
+        py+=132;
 
         // Set callback inline so it cannot be missed by setupCallbacks()
         btn_analyze_ = new Fl_Button(px,py,pw,20,"Analyse chord structure");
@@ -504,7 +506,9 @@ void HarmoniaApp::buildUI() {
 
         browser_resolutions_ = new Fl_Browser(px,py,pw,140);
         browser_resolutions_->textsize(9); browser_resolutions_->color(fl_rgb_color(18,22,30));
-        browser_resolutions_->textcolor(fl_rgb_color(220,200,170)); py+=142;
+        browser_resolutions_->textcolor(fl_rgb_color(220,200,170));
+        browser_resolutions_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
+        py+=142;
 
         btn_resolve_ = new Fl_Button(px,py,pw,20,"Show resolution paths");
         btn_resolve_->labelsize(9); btn_resolve_->color(fl_rgb_color(50,30,20));
@@ -517,7 +521,9 @@ void HarmoniaApp::buildUI() {
 
         browser_completion_ = new Fl_Browser(px,py,pw,100);
         browser_completion_->textsize(9); browser_completion_->color(fl_rgb_color(18,22,30));
-        browser_completion_->textcolor(fl_rgb_color(160,220,180)); py+=102;
+        browser_completion_->textcolor(fl_rgb_color(160,220,180));
+        browser_completion_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
+        py+=102;
 
         btn_complete_ = new Fl_Button(px,py,pw,20,"Suggest next voice");
         btn_complete_->labelsize(9); btn_complete_->color(fl_rgb_color(20,50,30));
@@ -530,7 +536,9 @@ void HarmoniaApp::buildUI() {
 
         browser_psycho_ = new Fl_Browser(px,py,pw,120);
         browser_psycho_->textsize(9); browser_psycho_->color(fl_rgb_color(18,22,30));
-        browser_psycho_->textcolor(fl_rgb_color(220,180,220)); py+=122;
+        browser_psycho_->textcolor(fl_rgb_color(220,180,220));
+        browser_psycho_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
+        py+=122;
 
         btn_psycho_ = new Fl_Button(px,py,pw,20,"Neural psychoanalysis");
         btn_psycho_->labelsize(9); btn_psycho_->color(fl_rgb_color(60,20,60));
@@ -578,6 +586,7 @@ void HarmoniaApp::buildUI() {
         browser_pivots_ = new Fl_Browser(px, py, pw, content_h - (py - content_y) - 10);
         browser_pivots_->textsize(9); browser_pivots_->color(fl_rgb_color(18, 22, 30));
         browser_pivots_->textcolor(COL_TEXT);
+        browser_pivots_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
         browser_pivots_->callback(cbBrowserPivots, this);
 
         grp_modulation_->end();
@@ -594,7 +603,9 @@ void HarmoniaApp::buildUI() {
         browser_keys_ = new Fl_Browser(px, py, pw, content_h - 120);
         browser_keys_->color(fl_rgb_color(18, 22, 30));
         browser_keys_->textcolor(COL_TEXT);
-        browser_keys_->textsize(11); py += content_h - 118;
+        browser_keys_->textsize(11);
+        browser_keys_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
+        py += content_h - 118;
 
         btn_add_chord_ = new Fl_Button(px, py, pw, 26, "+ Add Current Chord to Keys");
     btn_add_chord_->labelsize(10); btn_add_chord_->color(fl_rgb_color(30, 80, 50));
@@ -658,9 +669,13 @@ void HarmoniaApp::setupCallbacks() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  VOICE MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
-void HarmoniaApp::addVoice(int midi_note, TimbrePreset t) {
+void HarmoniaApp::addVoice(int midi_note, TimbrePreset t, int tx, int ty) {
     int id = audio_->addVoice(midi_note, t);
     if (id < 0) { fl_message("Max voices reached"); return; }
+
+    if (tx != -100 && ty != -100) {
+        audio_->setVoiceTonnetzCoords(id, tx, ty);
+    }
 
     static const int STRIP_H = 76;
     int sw = VOICE_PANEL_W - 12;
@@ -903,7 +918,7 @@ void HarmoniaApp::onIdle(void* data) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  TONNETZ CLICK — add voice at clicked pitch class
 // ─────────────────────────────────────────────────────────────────────────────
-void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
+void HarmoniaApp::onTonnetzClick(int pitch_class, int tx, int ty) {
     // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
     int base_octave = (int)sp_base_octave_->value();
     double cents = (double)pitch_class * 1200.0 / current_edo_;
@@ -915,7 +930,7 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
 
     int existing_id = -1;
     for (auto& v : voices) {
-        if (v.pitch_class == pitch_class) {
+        if (v.tonnetz_x == tx && v.tonnetz_y == ty) {
             existing_id = v.id; break;
         }
     }
@@ -923,7 +938,7 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int /*tx*/, int /*ty*/) {
     if (existing_id != -1) {
         removeVoice(existing_id);
     } else {
-        addVoice(closest_midi);
+        addVoice(closest_midi, TimbrePreset::SINE, tx, ty);
         if (!strips_.empty()) {
             VoiceStrip* s = strips_.back();
             s->manual = true; // Manually placed notes stay until removed
@@ -1525,7 +1540,7 @@ void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
             float detune = (float)(cents - (closest_midi - (base_octave * 12 + 12)) * 100.0);
 
             // We use the app-level addVoice so it creates the UI strip too
-            addVoice(closest_midi);
+            addVoice(closest_midi, TimbrePreset::SINE);
             if (!strips_.empty()) {
                 int newid = strips_.back()->voice_id;
                 audio_->setVoiceDetune(newid, detune);
