@@ -312,6 +312,7 @@ private:
 
     // Tonnetz click
     void onTonnetzClick(int pitch_class, int tx, int ty);
+    std::pair<int,int> highlightNodeForPC(int pc, int tx = -100, int ty = -100);
 
     std::string theoryDir_;
 };
@@ -489,6 +490,7 @@ void HarmoniaApp::buildUI() {
         h1->labelcolor(COL_ACCENT); h1->box(FL_NO_BOX); py+=18;
 
         browser_function_ = new Fl_Browser(px,py,pw,130);
+        browser_function_->type(FL_HOLD_BROWSER);
         browser_function_->textsize(9); browser_function_->color(fl_rgb_color(18,22,30));
         browser_function_->textcolor(COL_TEXT);
         browser_function_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
@@ -505,6 +507,7 @@ void HarmoniaApp::buildUI() {
         h2->labelcolor(fl_rgb_color(200,120,60)); h2->box(FL_NO_BOX); py+=18;
 
         browser_resolutions_ = new Fl_Browser(px,py,pw,140);
+        browser_resolutions_->type(FL_HOLD_BROWSER);
         browser_resolutions_->textsize(9); browser_resolutions_->color(fl_rgb_color(18,22,30));
         browser_resolutions_->textcolor(fl_rgb_color(220,200,170));
         browser_resolutions_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
@@ -520,6 +523,7 @@ void HarmoniaApp::buildUI() {
         h3->labelcolor(fl_rgb_color(100,200,140)); h3->box(FL_NO_BOX); py+=18;
 
         browser_completion_ = new Fl_Browser(px,py,pw,100);
+        browser_completion_->type(FL_HOLD_BROWSER);
         browser_completion_->textsize(9); browser_completion_->color(fl_rgb_color(18,22,30));
         browser_completion_->textcolor(fl_rgb_color(160,220,180));
         browser_completion_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
@@ -535,6 +539,7 @@ void HarmoniaApp::buildUI() {
         h5->labelcolor(fl_rgb_color(200,100,200)); h5->box(FL_NO_BOX); py+=18;
 
         browser_psycho_ = new Fl_Browser(px,py,pw,120);
+        browser_psycho_->type(FL_HOLD_BROWSER);
         browser_psycho_->textsize(9); browser_psycho_->color(fl_rgb_color(18,22,30));
         browser_psycho_->textcolor(fl_rgb_color(220,180,220));
         browser_psycho_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
@@ -555,8 +560,10 @@ void HarmoniaApp::buildUI() {
         h4->labelcolor(fl_rgb_color(140,100,220)); h4->box(FL_NO_BOX); py+=18;
 
         browser_edo_ = new Fl_Browser(px,py,pw, content_h-(py-content_y)-28);
+        browser_edo_->type(FL_HOLD_BROWSER);
         browser_edo_->textsize(9); browser_edo_->color(fl_rgb_color(18,22,30));
         browser_edo_->textcolor(fl_rgb_color(180,160,220));
+        browser_edo_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
         py = content_y+content_h-26;
 
         btn_edo_ = new Fl_Button(px,py,pw,22,"Analyse EDO");
@@ -584,6 +591,7 @@ void HarmoniaApp::buildUI() {
         btn_find_pivots_->callback(cbFindPivots, this); py += 26;
 
         browser_pivots_ = new Fl_Browser(px, py, pw, content_h - (py - content_y) - 10);
+        browser_pivots_->type(FL_HOLD_BROWSER);
         browser_pivots_->textsize(9); browser_pivots_->color(fl_rgb_color(18, 22, 30));
         browser_pivots_->textcolor(COL_TEXT);
         browser_pivots_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
@@ -601,6 +609,7 @@ void HarmoniaApp::buildUI() {
         h_inst->labelcolor(COL_ACCENT); h_inst->box(FL_NO_BOX); py += 20;
 
         browser_keys_ = new Fl_Browser(px, py, pw, content_h - 120);
+        browser_keys_->type(FL_HOLD_BROWSER);
         browser_keys_->color(fl_rgb_color(18, 22, 30));
         browser_keys_->textcolor(COL_TEXT);
         browser_keys_->textsize(11);
@@ -660,6 +669,7 @@ void HarmoniaApp::setupCallbacks() {
     browser_psycho_->callback(cbBrowserPsycho, this);
     browser_pivots_->callback(cbBrowserPivots, this);
     browser_keys_->callback(cbBrowserKeys, this);
+    browser_edo_->callback([](Fl_Widget*, void*){}, nullptr);
 
     tonnetz_->setNodeClickCallback([this](int pc, int tx, int ty){
         onTonnetzClick(pc, tx, ty);
@@ -916,9 +926,36 @@ void HarmoniaApp::onIdle(void* data) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  TONNETZ CLICK — add voice at clicked pitch class
+//  TONNETZ HIGHLIGHTING
 // ─────────────────────────────────────────────────────────────────────────────
+std::pair<int,int> HarmoniaApp::highlightNodeForPC(int pc, int tx, int ty) {
+    if (pc < 0) {
+        tonnetz_->setHighlightedPC(-1);
+        return {-100, -100};
+    }
+
+    int best_tx = tx, best_ty = ty;
+    if (best_tx == -100) {
+        // Find node closest to center with this pitch class
+        float best_d = 1e9;
+        for (const auto& n : tonnetz_->nodes()) {
+            if (n.pitch_class == pc) {
+                float d = std::sqrt((float)n.x*n.x + (float)n.y*n.y);
+                if (d < best_d) { best_d = d; best_tx = n.x; best_ty = n.y; }
+            }
+        }
+    }
+
+    if (best_tx != -100) {
+        tonnetz_->setHighlightedNode(best_tx, best_ty);
+    } else {
+        tonnetz_->setHighlightedPC(pc);
+    }
+    return {best_tx, best_ty};
+}
+
 void HarmoniaApp::onTonnetzClick(int pitch_class, int tx, int ty) {
+    tonnetz_->setHighlightedNode(tx, ty);
     // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
     int base_octave = (int)sp_base_octave_->value();
     double cents = (double)pitch_class * 1200.0 / current_edo_;
@@ -980,6 +1017,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
             snprintf(buf,sizeof(buf),"@b%s  [tension=%d]  dist=%.2f",
                      fa.function.c_str(), fa.tension_level, tt.distance);
             browser_function_->add(buf);
+            browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
 
             // truncated reason (split into lines)
             std::string reason = fa.function_reason;
@@ -987,13 +1025,18 @@ void HarmoniaApp::updateFunctionalAnalysis() {
                 size_t split = reason.rfind(' ', 50);
                 if (split == std::string::npos) split = 50;
                 browser_function_->add(("  " + reason.substr(0,split)).c_str());
+                browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
                 reason = reason.substr(split+1);
             }
-            if (!reason.empty()) browser_function_->add(("  " + reason).c_str());
+            if (!reason.empty()) {
+                browser_function_->add(("  " + reason).c_str());
+                browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
+            }
 
             // ── Set class
             // We get this from the same analyze_chord call via raw query
             browser_function_->add("  —");
+            browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
 
             // ── Tritone
             if (fa.has_tritone && fa.tritone.size() >= 2) {
@@ -1016,6 +1059,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
             // ── Tendency tones
             if (!fa.tendency_tones.empty()) {
                 browser_function_->add("  Tendency tones:");
+                browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
                 for (auto& t : fa.tendency_tones) {
                     snprintf(buf,sizeof(buf),"   %s (%s) -> %s [%s]",
                              t.name.c_str(), t.role.c_str(),
@@ -1029,6 +1073,7 @@ void HarmoniaApp::updateFunctionalAnalysis() {
             snprintf(buf,sizeof(buf),"  Tension: %s (%.0f%%)",
                      tt.tension_label.c_str(), tt.tension*100.f);
             browser_function_->add(buf);
+            browser_function_->data(browser_function_->size(), (void*)(intptr_t)-1);
 
             browser_function_->redraw();
         });
@@ -1060,9 +1105,15 @@ void HarmoniaApp::updateFunctionalAnalysis() {
             std::string cname   = TheoryBridge::jStr(resp,"common_name","");
             char buf[128];
             snprintf(buf,sizeof(buf),"  Forte: %s  (%s)", forte.c_str(), cname.c_str());
-            if (browser_function_) browser_function_->insert(3, buf);
+            if (browser_function_) {
+                browser_function_->insert(3, buf);
+                browser_function_->data(3, (void*)(intptr_t)-1);
+            }
             snprintf(buf,sizeof(buf),"  ICV:   [%s]", ic_desc.c_str());
-            if (browser_function_) browser_function_->insert(4, buf);
+            if (browser_function_) {
+                browser_function_->insert(4, buf);
+                browser_function_->data(4, (void*)(intptr_t)-1);
+            }
             browser_function_->redraw();
         });
 }
@@ -1109,6 +1160,7 @@ void HarmoniaApp::updateResolutionPaths() {
                     browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)(m.to_pc + 1000));
                 }
                 browser_resolutions_->add(" ");
+                browser_resolutions_->data(browser_resolutions_->size(), (void*)(intptr_t)-1);
                 path_idx++;
             }
             browser_resolutions_->redraw();
@@ -1140,8 +1192,10 @@ void HarmoniaApp::updateCompletionSuggestions() {
                     browser_completion_->add(("   " + r).c_str());
                     browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc + 1000));
                 }
-                if (!s.structural_reasons.empty())
+                if (!s.structural_reasons.empty()) {
                     browser_completion_->add(" ");
+                    browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)-1);
+                }
             }
             browser_completion_->redraw();
         });
@@ -1161,23 +1215,29 @@ void HarmoniaApp::updatePsychoAnalysis() {
             snprintf(buf, sizeof(buf), "@bTENSION: %s (%.2f)",
                      pa.perceptual_tension_label.c_str(), pa.perceptual_tension);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
 
             snprintf(buf, sizeof(buf), "  Breakdown: R:%.2f H:%.2f T:%.2f",
                      pa.tension_breakdown.roughness_component,
                      pa.tension_breakdown.harmonicity_component,
                      pa.tension_breakdown.tonal_component);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
 
             browser_psycho_->add("@bL1: PERIPHERAL");
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             snprintf(buf, sizeof(buf), "  Consonance: %.2f", pa.level1.consonance_score);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             if (!pa.level1.masked_tone_names.empty()) {
                 std::string mt = "  Masked: ";
                 for (auto& s : pa.level1.masked_tone_names) mt += s + " ";
                 browser_psycho_->add(mt.c_str());
+                browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             }
 
             browser_psycho_->add("@bL2: BRAINSTEM");
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             snprintf(buf, sizeof(buf), "  Virtual Root: %s (%.2fHz)",
                      pa.level2.virtual_pitch_name.c_str(), pa.level2.virtual_pitch_hz);
             browser_psycho_->add(buf);
@@ -1188,14 +1248,18 @@ void HarmoniaApp::updatePsychoAnalysis() {
             snprintf(buf, sizeof(buf), "  Harmonicity: %s (%.2f)",
                      pa.level2.harmonicity_label.c_str(), pa.level2.harmonicity);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
 
             browser_psycho_->add("@bL3: CORTICAL");
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             snprintf(buf, sizeof(buf), "  Tonal Stability: %s (%.2f)",
                      pa.level3.kk_stability_label.c_str(), pa.level3.kk_tonal_stability);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
             snprintf(buf, sizeof(buf), "  Centroid: %s (%.0fHz)",
                      pa.level3.spectral_centroid_name.c_str(), pa.level3.spectral_centroid_hz);
             browser_psycho_->add(buf);
+            browser_psycho_->data(browser_psycho_->size(), (void*)(intptr_t)-1);
 
             browser_psycho_->redraw();
         });
@@ -1209,13 +1273,17 @@ void HarmoniaApp::updateEDOAnalysis() {
             snprintf(buf,sizeof(buf),"EDO-%d  step=%.2f¢",
                      current_edo_, TheoryBridge::jFloat(raw,"step_cents"));
             browser_edo_->add(buf);
+            browser_edo_->data(browser_edo_->size(), (void*)(intptr_t)-1);
             snprintf(buf,sizeof(buf),"5-limit score: %.1f%%",
                      TheoryBridge::jFloat(raw,"consonance_score"));
             browser_edo_->add(buf);
+            browser_edo_->data(browser_edo_->size(), (void*)(intptr_t)-1);
             snprintf(buf,sizeof(buf),"7-limit score: %.1f%%",
                      TheoryBridge::jFloat(raw,"seven_limit_score"));
             browser_edo_->add(buf);
+            browser_edo_->data(browser_edo_->size(), (void*)(intptr_t)-1);
             browser_edo_->add("  — Prime errors from JI —");
+            browser_edo_->data(browser_edo_->size(), (void*)(intptr_t)-1);
 
             static const struct { const char* prime; const char* name; } PRIMES[] = {
                 {"3","P5/P4"},{"5","M3/m6"},{"7","h7"},{"11","11th"},{"13","13th"},{nullptr,nullptr}
@@ -1235,6 +1303,7 @@ void HarmoniaApp::updateEDOAnalysis() {
                 snprintf(buf,sizeof(buf),"  prime %s (%s):  %+.2f¢",
                          PRIMES[i].prime, PRIMES[i].name, ev);
                 browser_edo_->add(buf);
+                browser_edo_->data(browser_edo_->size(), (void*)(intptr_t)-1);
             }
             browser_edo_->redraw();
         });
@@ -1250,11 +1319,15 @@ void HarmoniaApp::updatePivotSearch() {
 
             snprintf(buf, sizeof(buf), "@bRelation: %s", res.cof_relationship.c_str());
             browser_pivots_->add(buf);
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
             snprintf(buf, sizeof(buf), "Distance: %d steps on CoF", res.cof_distance);
             browser_pivots_->add(buf);
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
 
             browser_pivots_->add("");
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
             browser_pivots_->add("@bTOP PIVOT CHORDS:");
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
             int idx = 0;
             for (auto& p : res.all_pivots) {
                 snprintf(buf, sizeof(buf), "@C4[%d] %s: %s -> %s",
@@ -1277,7 +1350,9 @@ void HarmoniaApp::updatePivotSearch() {
             }
 
             browser_pivots_->add("");
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
             browser_pivots_->add("@bOPTIMAL MODULATION PATH:");
+            browser_pivots_->data(browser_pivots_->size(), (void*)(intptr_t)-1);
             for (auto& s : res.modulation_path) {
                 if (s.key_context == "pivot") {
                     snprintf(buf, sizeof(buf), "  [PIVOT] %s = %s",
@@ -1369,33 +1444,37 @@ void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
 
     int val = (int)(intptr_t)b->data(line);
     if (val >= 1000) {
         int pc = val - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
-    } else {
+    } else if (val > 0) {
         int idx = val - 1;
         if (idx < 0 || idx >= (int)app->last_pivot_res_.all_pivots.size()) {
-            app->tonnetz_->setHighlightedPC(-1);
+            app->highlightNodeForPC(-1);
             return;
         }
 
         const auto& p = app->last_pivot_res_.all_pivots[idx];
-        app->tonnetz_->setHighlightedPC(p.root);
+        app->highlightNodeForPC(p.root);
 
         if (Fl::event_clicks()) {
+            Fl::event_clicks(0);
             ChordKey ck;
             ck.name = p.label;
             ck.pcs  = p.pcs;
             app->playChord(ck, true);
         }
+    } else {
+        app->highlightNodeForPC(-1);
     }
 }
 
@@ -1404,19 +1483,20 @@ void HarmoniaApp::cbBrowserFunction(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
 
     int data = (int)(intptr_t)b->data(line);
     if (data >= 1000) {
         int pc = data - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
     } else {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
     }
 }
 
@@ -1425,18 +1505,19 @@ void HarmoniaApp::cbBrowserPsycho(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
     int data = (int)(intptr_t)b->data(line);
     if (data >= 1000) {
         int pc = data - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
     } else {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
     }
 }
 
@@ -1487,21 +1568,23 @@ void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
 
     int val = (int)(intptr_t)b->data(line);
     if (val >= 1000) {
         int pc = val - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
     } else if (val > 0 && val <= (int)app->instrument_keyboard_.size()) {
         const auto& ck = app->instrument_keyboard_[val - 1];
-        if (ck.pcs.size() > 0) app->tonnetz_->setHighlightedPC(ck.pcs[0]);
+        if (ck.pcs.size() > 0) app->highlightNodeForPC(ck.pcs[0]);
         if (Fl::event_clicks()) {
+            Fl::event_clicks(0);
             app->playChord(ck, true);
         }
     } else {
@@ -1603,16 +1686,17 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
 
     int val = (int)(intptr_t)b->data(line);
     if (val >= 1000) {
         int pc = val - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
     } else if (val > 0) {
         int path_idx = val - 1;
@@ -1621,8 +1705,9 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
             return;
         }
         const auto& rp = app->last_resolutions_[path_idx];
-        app->tonnetz_->setHighlightedPC(rp.target_root);
+        app->highlightNodeForPC(rp.target_root);
         if (Fl::event_clicks()) {
+            Fl::event_clicks(0);
             ChordKey ck;
             ck.name = rp.target_label;
             ck.pcs = rp.target_pcs;
@@ -1638,19 +1723,20 @@ void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
     Fl_Browser* b = (Fl_Browser*)w;
     int line = b->value();
     if (line <= 0) {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
         return;
     }
 
     int data = (int)(intptr_t)b->data(line);
     if (data >= 1000) {
         int pc = data - 1000;
-        app->tonnetz_->setHighlightedPC(pc);
+        auto coords = app->highlightNodeForPC(pc);
         if (Fl::event_clicks()) {
-            app->onTonnetzClick(pc, 0, 0);
+            Fl::event_clicks(0);
+            app->onTonnetzClick(pc, coords.first, coords.second);
         }
     } else {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
     }
 }
 

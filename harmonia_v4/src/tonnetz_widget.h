@@ -54,13 +54,23 @@ public:
 
     void setHighlightedPC(int pc) {
         highlighted_pcs_.clear();
+        highlighted_node_x_ = highlighted_node_y_ = -100;
         if (pc >= 0) highlighted_pcs_.push_back(pc);
         redraw();
     }
     void setHighlightedPCs(const std::vector<int>& pcs) {
         highlighted_pcs_ = pcs;
+        highlighted_node_x_ = highlighted_node_y_ = -100;
         redraw();
     }
+    void setHighlightedNode(int tx, int ty) {
+        highlighted_pcs_.clear();
+        highlighted_node_x_ = tx;
+        highlighted_node_y_ = ty;
+        redraw();
+    }
+
+    const std::vector<TonnetzNode>& nodes() const { return nodes_; }
 
     void draw() override;
     int  handle(int event) override;
@@ -78,6 +88,8 @@ private:
     std::vector<RoughnessRecord> roughness_;
     std::vector<std::pair<int,int>> progression_path_;
     std::vector<int> highlighted_pcs_;
+    int              highlighted_node_x_{-100};
+    int              highlighted_node_y_{-100};
 
     // ── camera
     float pan_x_{0.f}, pan_y_{0.f};

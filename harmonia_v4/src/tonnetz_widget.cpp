@@ -335,7 +335,8 @@ void TonnetzWidget::drawNodes() {
         float pr,pg,pb;
         Voice::pcColorHSV(n.pitch_class, edo_, pr,pg,pb);
 
-        bool is_highlighted = std::find(highlighted_pcs_.begin(), highlighted_pcs_.end(), n.pitch_class) != highlighted_pcs_.end();
+        bool is_highlighted = (n.x == highlighted_node_x_ && n.y == highlighted_node_y_) ||
+                              (std::find(highlighted_pcs_.begin(), highlighted_pcs_.end(), n.pitch_class) != highlighted_pcs_.end());
 
         if (has_voice) {
             // Active voice: bright node with glow
@@ -362,7 +363,7 @@ void TonnetzWidget::drawLabels() {
     for (auto& n : nodes_) {
         bool has_voice = false;
         for (auto& v : voices_)
-            if (v.active && v.pitch_class == n.pitch_class) { has_voice = true; break; }
+            if (v.active && v.tonnetz_x == n.x && v.tonnetz_y == n.y) { has_voice = true; break; }
 
         if (has_voice) glColor3f(0.05f,0.05f,0.05f);
         else           glColor3f(0.85f,0.85f,0.85f);
