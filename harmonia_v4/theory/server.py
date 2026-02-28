@@ -26,6 +26,16 @@ MODULE 5  TONNETZ TENSION           (geometric + psychoacoustic hybrid)
 MODULE 6  PATTERN RECOGNITION       (sequence / PLR / circle-of-fifths)
 MODULE 7  EDO / JI LATTICE          (prime-limit ratio analysis)
 MODULE 8  VOICE COMPLETION          (psychoacoustic scoring)
+MODULE 9  PIVOT CHORD SEARCH        (modulation theory)
+   9.1  Roman numeral system            (diatonic + chromatic degrees)
+   9.2  Diatonic chord inventory        (triads + seventh chords)
+   9.3  Common-chord pivots             (shared diatonic membership)
+   9.4  Secondary dominant pivots       (applied dominants V/x)
+   9.5  Enharmonic pivots               (dim7 × 4, GerAug6 ↔ Dom7, aug+ × 3)
+   9.6  Borrowed / modal-mixture pivots (parallel minor ♭III ♭VI ♭VII)
+   9.7  Chromatic mediant pivots        (PLR-L / PLR-R cross-key)
+   9.8  Pivot scoring                   (common-tone × KK × VL × tension)
+   9.9  Modulation path search          (Dijkstra over dual-key chord graph)
 """
 
 import sys
@@ -1514,6 +1524,893 @@ def suggest_completion(pitch_classes: List[int], key: int,
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# MODULE 9  —  PIVOT CHORD SEARCH  (modulation theory)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── 9.1  Roman numeral system ─────────────────────────────────────────────────
+
+_DIAT_SEMITONES = [0, 2, 4, 5, 7, 9, 11]
+_DIAT_DEGREE    = {s: i for i, s in enumerate(_DIAT_SEMITONES)}
+_ROMAN_UP       = ['I',  'II',  'III',  'IV',  'V',  'VI',  'VII']
+_ROMAN_LO       = ['i',  'ii',  'iii',  'iv',  'v',  'vi',  'vii']
+
+_CHROM_MAP: Dict[int, Tuple[str, int, bool]] = {
+    1:  ('b', 1, True),
+    3:  ('b', 2, True),
+    6:  ('#', 3, False),
+    8:  ('b', 5, True),
+    10: ('b', 6, True),
+}
+
+
+def roman_numeral(semitones_from_key: int, quality: str) -> str:
+    """
+    Convert (interval from tonic in semitones, chord quality) to Roman numeral.
+
+    Examples:
+        (0,  'maj') -> 'I'        (9,  'min') -> 'vi'
+        (11, 'dim') -> 'vii'      (7,  'dom7') -> 'V7'
+        (10, 'maj') -> 'bVII'     (3,  'min') -> 'biii'
+        (6,  'dim') -> '#iv'
+    """
+    s = semitones_from_key % 12
+    q = quality.lower()
+    suffix = {'dim': 'o', 'aug': '+', 'maj7': 'M7', 'min7': 'm7',
+              'dom7': '7', 'hdim7': 'o7', 'dim7': 'o7'}.get(q, '')
+
+    if s in _DIAT_DEGREE:
+        idx  = _DIAT_DEGREE[s]
+        base = _ROMAN_UP[idx] if q in ('maj','aug','maj7','dom7','') else _ROMAN_LO[idx]
+        return base + suffix
+    elif s in _CHROM_MAP:
+        prefix, idx, is_flat = _CHROM_MAP[s]
+        if s == 6 and q in ('dim','dim7'):
+            prefix = '#'; idx = 3
+        elif s == 6:
+            prefix = 'b'; idx = 4
+        base = _ROMAN_UP[idx] if q in ('maj','aug','maj7','dom7','') else _ROMAN_LO[idx]
+        return prefix + base + suffix
+    else:
+        return f"({s}){suffix}"
+
+
+def roman_label(root_pc: int, quality: str, key: int) -> str:
+    """Roman numeral of a chord (root_pc, quality) relative to key."""
+    return roman_numeral((root_pc - key) % 12, quality)
+
+
+# ── 9.2  Diatonic chord inventory ─────────────────────────────────────────────
+
+_SEVENTH_TYPES: Dict[Tuple[int,int,int], str] = {
+    (4, 7, 11): 'maj7',
+    (4, 7, 10): 'dom7',
+    (3, 7, 10): 'min7',
+    (3, 6, 10): 'hdim7',
+    (3, 6,  9): 'dim7',
+    (4, 8, 11): 'augmaj7',
+    (4, 8, 10): 'aug7',
+}
+
+
+def _chord_quality_from_intervals(third_iv: int, fifth_iv: int) -> str:
+    if third_iv == 4 and fifth_iv == 7: return 'maj'
+    if third_iv == 3 and fifth_iv == 7: return 'min'
+    if third_iv == 3 and fifth_iv == 6: return 'dim'
+    if third_iv == 4 and fifth_iv == 8: return 'aug'
+    return 'other'
+
+
+def diatonic_chord_inventory(
+        key: int,
+        mode: str = 'Ionian',
+        include_sevenths: bool = True,
+        include_borrowed: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Build the full diatonic chord inventory for a key.
+
+    Returns a list of dicts:
+        root, quality, pcs, roman, function, seventh_type (optional),
+        kk_stability, tension, degree_semitones, source
+
+    If include_borrowed=True, adds the six most common borrowed chords from
+    the parallel minor (bIII, bVI, bVII, iv, ii°, Neapolitan bII).
+    """
+    scale = diatonic_set(key, mode)
+    inventory: List[Dict[str, Any]] = []
+
+    for i in range(7):
+        root    = scale[i]
+        third   = scale[(i + 2) % 7]
+        fifth   = scale[(i + 4) % 7]
+        seventh = scale[(i + 6) % 7] if include_sevenths else None
+
+        third_iv = (third - root) % 12
+        fifth_iv = (fifth - root) % 12
+        q        = _chord_quality_from_intervals(third_iv, fifth_iv)
+        pcs      = sorted({root, third, fifth})
+
+        seventh_type = None
+        seventh_pcs  = pcs
+        if include_sevenths and seventh is not None:
+            sev_iv       = (seventh - root) % 12
+            seventh_type = _SEVENTH_TYPES.get((third_iv, fifth_iv, sev_iv))
+            seventh_pcs  = sorted({root, third, fifth, seventh})
+
+        deg_semi = (root - key) % 12
+        rom      = roman_numeral(deg_semi, q)
+        func     = functional_analysis(pcs, key)["function"]
+        kk       = tonal_hierarchy_score(pcs, key)["kk_normalized"]
+        ten      = tonnetz_tension(pcs, key, include_psychoacoustic=False)["tension"]
+
+        entry: Dict[str, Any] = {
+            "root"            : root,
+            "quality"         : q,
+            "pcs"             : pcs,
+            "label"           : nn(root) + ('' if q=='maj' else
+                                            'm'  if q=='min' else
+                                            'o'  if q=='dim' else '+'),
+            "roman"           : rom,
+            "degree_semitones": deg_semi,
+            "scale_degree"    : i + 1,
+            "function"        : func,
+            "kk_stability"    : round(kk, 4),
+            "tension"         : round(ten, 4),
+            "source"          : "diatonic",
+        }
+        if include_sevenths and seventh_type:
+            entry["seventh_type"] = seventh_type
+            entry["pcs_with_7"]   = seventh_pcs
+            entry["roman_7"]      = roman_numeral(deg_semi, seventh_type)
+
+        inventory.append(entry)
+
+    if include_borrowed:
+        borrowed_defs = [
+            (3,  'maj', '',  'bIII  - borrowed from Aeolian / parallel minor'),
+            (8,  'maj', '',  'bVI   - borrowed from Aeolian / parallel minor'),
+            (10, 'maj', '',  'bVII  - borrowed from Mixolydian / parallel minor'),
+            (5,  'min', 'm', 'iv    - minor subdominant (borrowed)'),
+            (2,  'dim', 'o', 'iio   - borrowed from Aeolian'),
+            (1,  'maj', '',  'bII   - Neapolitan (borrowed)'),
+        ]
+        existing_sets = {frozenset(c['pcs']) for c in inventory}
+        for deg, q, suffix, src in borrowed_defs:
+            root   = (key + deg) % 12
+            pcs    = triad_pcs(root, q)
+            pcs_fs = frozenset(pcs)
+            if pcs_fs in existing_sets:
+                continue
+            deg_semi = (root - key) % 12
+            rom      = roman_numeral(deg_semi, q)
+            func     = functional_analysis(pcs, key)["function"]
+            kk       = tonal_hierarchy_score(pcs, key)["kk_normalized"]
+            ten      = tonnetz_tension(pcs, key, include_psychoacoustic=False)["tension"]
+            inventory.append({
+                "root"            : root,
+                "quality"         : q,
+                "pcs"             : pcs,
+                "label"           : nn(root) + suffix,
+                "roman"           : rom,
+                "degree_semitones": deg_semi,
+                "scale_degree"    : None,
+                "function"        : func,
+                "kk_stability"    : round(kk, 4),
+                "tension"         : round(ten, 4),
+                "source"          : "borrowed",
+                "source_desc"     : src,
+            })
+    return inventory
+
+
+def _inventory_map(key: int, include_borrowed: bool = False) -> Dict[FrozenSet, Dict]:
+    """FrozenSet[pcs] -> chord-info dict for fast pivot lookup."""
+    return {frozenset(c['pcs']): c
+            for c in diatonic_chord_inventory(key, include_borrowed=include_borrowed)}
+
+
+# ── 9.3  Pivot scoring ────────────────────────────────────────────────────────
+
+def _pivot_score(common_tones: int, kk_from: float, kk_to: float,
+                 vl_to_v: int, tension_from: float, tension_to: float) -> float:
+    """
+    Composite pivot quality score (0-1).
+
+    Weights:
+        40% - common-tone count (normalised to [0,1])
+        20% - KK stability in key_from (smooth departure)
+        15% - KK stability in key_to   (establishes new key)
+        15% - VL distance to V of key_to  (lower = better)
+        10% - tension balance (similar tension in both contexts = smoother pivot)
+    """
+    ct_norm   = min(1.0, common_tones / 3.0)
+    vl_norm   = max(0.0, 1.0 - vl_to_v / 8.0)
+    t_balance = 1.0 - abs(tension_from - tension_to)
+    return round(
+        0.40 * ct_norm   +
+        0.20 * kk_from   +
+        0.15 * kk_to     +
+        0.15 * vl_norm   +
+        0.10 * t_balance,
+        4)
+
+
+# ── 9.4  Common-chord pivots ──────────────────────────────────────────────────
+
+def common_chord_pivots(
+        key_from        : int,
+        key_to          : int,
+        include_borrowed: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Find all chords whose pitch-class set is diatonic in *both* key_from
+    and key_to (optionally including borrowed chords from parallel minor).
+
+    Each result:
+        pcs, label, roman_from, roman_to, function_from, function_to,
+        kk_stability_from/to, tension_from/to,
+        vl_to_dominant_of_target, pivot_score, interpretation
+    """
+    inv_from    = _inventory_map(key_from, include_borrowed)
+    inv_to      = _inventory_map(key_to,   include_borrowed)
+    v_of_to_pcs = triad_pcs((key_to + 7) % 12, 'maj')
+    results     = []
+
+    for pcs_fs in inv_from:
+        if pcs_fs not in inv_to:
+            continue
+        cf       = inv_from[pcs_fs]
+        ct       = inv_to  [pcs_fs]
+        pcs_list = sorted(pcs_fs)
+        vl_to_v  = orbifold_voice_leading(pcs_list, v_of_to_pcs)["distance"]
+        score    = _pivot_score(len(pcs_list), cf["kk_stability"], ct["kk_stability"],
+                                vl_to_v, cf["tension"], ct["tension"])
+        results.append({
+            "type"                     : "common_chord",
+            "pcs"                      : pcs_list,
+            "label"                    : cf["label"],
+            "root"                     : cf["root"],
+            "quality"                  : cf["quality"],
+            "roman_from"               : cf["roman"],
+            "roman_to"                 : ct["roman"],
+            "function_from"            : cf["function"],
+            "function_to"              : ct["function"],
+            "source_from"              : cf.get("source","diatonic"),
+            "source_to"                : ct.get("source","diatonic"),
+            "kk_stability_from"        : cf["kk_stability"],
+            "kk_stability_to"          : ct["kk_stability"],
+            "tension_from"             : cf["tension"],
+            "tension_to"               : ct["tension"],
+            "vl_to_dominant_of_target" : vl_to_v,
+            "pivot_score"              : score,
+            "interpretation"           : (
+                f"{cf['roman']} in {nn(key_from)} ({cf['function'].lower()}) "
+                f"-> {ct['roman']} in {nn(key_to)} ({ct['function'].lower()})"),
+        })
+
+    results.sort(key=lambda x: -x["pivot_score"])
+    return results
+
+
+# ── 9.5  Secondary dominant pivots ────────────────────────────────────────────
+
+def secondary_dominant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+    """
+    Find V7/x applied-dominant chords that are functional in key_from and
+    resolve naturally to a diatonic chord in key_to.
+
+    The strongest case: V7/x in key_from IS the V7 of key_to -> direct
+    dominant approach to the new tonic.
+    """
+    scale_from   = diatonic_set(key_from)
+    v7_of_to_root= (key_to + 7) % 12
+    inv_to       = _inventory_map(key_to, include_borrowed=True)
+    results      = []
+
+    for i, deg_root in enumerate(scale_from):
+        secdom_root = (deg_root + 7) % 12
+        secdom_pcs  = [(secdom_root + iv) % 12 for iv in [0, 4, 7, 10]]
+        roman_from  = f"V7/{roman_numeral((deg_root - key_from) % 12, 'maj')}"
+
+        if secdom_root == v7_of_to_root:
+            pcs_s    = sorted(secdom_pcs)
+            vl_to_i  = orbifold_voice_leading(pcs_s, triad_pcs(key_to,'maj'))["distance"]
+            kk_from  = tonal_hierarchy_score(pcs_s, key_from)["kk_normalized"]
+            kk_to    = tonal_hierarchy_score(pcs_s, key_to  )["kk_normalized"]
+            ten_from = tonnetz_tension(pcs_s, key_from, include_psychoacoustic=False)["tension"]
+            ten_to   = tonnetz_tension(pcs_s, key_to,   include_psychoacoustic=False)["tension"]
+            score    = _pivot_score(2, kk_from, kk_to, vl_to_i, ten_from, ten_to)
+            results.append({
+                "type"                    : "secondary_dominant",
+                "pcs"                     : pcs_s,
+                "label"                   : nn(secdom_root) + "7",
+                "root"                    : secdom_root,
+                "quality"                 : "dom7",
+                "roman_from"              : roman_from,
+                "roman_to"                : "V7",
+                "function_from"           : "DOMINANT (applied)",
+                "function_to"             : "DOMINANT",
+                "applied_to_scale_degree" : i + 1,
+                "applied_to_name"         : nn(deg_root),
+                "kk_stability_from"       : round(kk_from, 4),
+                "kk_stability_to"         : round(kk_to, 4),
+                "vl_to_tonic_of_target"   : vl_to_i,
+                "pivot_score"             : score,
+                "interpretation"          : (
+                    f"{roman_from} in {nn(key_from)} IS V7 of {nn(key_to)}. "
+                    f"Strongest applied-dominant pivot -> resolves directly to new tonic."),
+            })
+        else:
+            for sub_pcs in [sorted(secdom_pcs),
+                            sorted({secdom_pcs[0],secdom_pcs[1],secdom_pcs[2]}),
+                            sorted({secdom_pcs[0],secdom_pcs[1],secdom_pcs[3]}),
+                            sorted({secdom_pcs[0],secdom_pcs[2],secdom_pcs[3]})]:
+                if frozenset(sub_pcs) in inv_to:
+                    ct_info  = inv_to[frozenset(sub_pcs)]
+                    kk_from  = tonal_hierarchy_score(sorted(secdom_pcs), key_from)["kk_normalized"]
+                    vl_to_v  = orbifold_voice_leading(sub_pcs, triad_pcs((key_to+7)%12,'maj'))["distance"]
+                    ten_from = tonnetz_tension(sorted(secdom_pcs), key_from, include_psychoacoustic=False)["tension"]
+                    score    = _pivot_score(len(sub_pcs), kk_from, ct_info["kk_stability"],
+                                            vl_to_v, ten_from, ct_info["tension"])
+                    results.append({
+                        "type"                    : "secondary_dominant",
+                        "pcs"                     : sub_pcs,
+                        "label"                   : nn(secdom_root) + "7",
+                        "root"                    : secdom_root,
+                        "quality"                 : "dom7",
+                        "roman_from"              : roman_from,
+                        "roman_to"                : ct_info["roman"],
+                        "function_from"           : "DOMINANT (applied)",
+                        "function_to"             : ct_info["function"],
+                        "applied_to_scale_degree" : i + 1,
+                        "applied_to_name"         : nn(deg_root),
+                        "kk_stability_from"       : round(kk_from, 4),
+                        "kk_stability_to"         : ct_info["kk_stability"],
+                        "vl_to_dominant_of_target": vl_to_v,
+                        "pivot_score"             : score,
+                        "interpretation"          : (
+                            f"{roman_from} in {nn(key_from)} = "
+                            f"{ct_info['roman']} in {nn(key_to)}."),
+                    })
+                    break
+
+    results.sort(key=lambda x: -x["pivot_score"])
+    return results
+
+
+# ── 9.6  Enharmonic pivots ────────────────────────────────────────────────────
+
+def enharmonic_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+    """
+    Three classic enharmonic pivot families:
+
+    (A) Diminished 7th -- 4-way enharmonic ambiguity
+        Each note of a dim7 chord can serve as the leading tone (semitone
+        below tonic) of a different key, giving four possible interpretations
+        of the same pitch-class set.
+
+    (B) German Augmented Sixth <-> Dominant Seventh
+        Ger+6 in key X = pcs (X+8, X, X+3, X+6).
+        Enharmonically identical to the dom7 built on (X+8).
+        That dom7 resolves to the key whose tonic is (X+1) -- a semitone
+        above X. Classic: Ger+6 in C -> enharmonic Ab7 -> pivot to Db major.
+
+    (C) Augmented triad -- 3-way enharmonic ambiguity
+        Each note of an augmented triad can serve as III+ or V+ of three
+        different keys, exploiting the equal-tempered symmetry of the chord.
+    """
+    results = []
+
+    # (A) Dim7 ----------------------------------------------------------
+    dim7_classes = [{0,3,6,9}, {1,4,7,10}, {2,5,8,11}]
+    for dim7_set in dim7_classes:
+        for lt in sorted(dim7_set):
+            tonic_implied = (lt + 1) % 12
+            is_from = (lt == (key_from + 11) % 12)
+            is_to   = (tonic_implied == key_to)
+            if not (is_from or is_to):
+                continue
+            pcs_list = sorted(dim7_set)
+            kk_from  = tonal_hierarchy_score(pcs_list, key_from)["kk_normalized"]
+            kk_to    = tonal_hierarchy_score(pcs_list, key_to  )["kk_normalized"]
+            vl_to_v  = orbifold_voice_leading(
+                pcs_list, triad_pcs((key_to+7)%12,'maj'))["distance"]
+            ten_from = tonnetz_tension(pcs_list, key_from, include_psychoacoustic=False)["tension"]
+            ten_to   = tonnetz_tension(pcs_list, key_to,   include_psychoacoustic=False)["tension"]
+            score    = _pivot_score(3, kk_from, kk_to, vl_to_v, ten_from, ten_to)
+            results.append({
+                "type"                    : "enharmonic_dim7",
+                "pcs"                     : pcs_list,
+                "label"                   : nn(lt) + "o7",
+                "root_as_leading_tone"    : lt,
+                "implied_tonic"           : tonic_implied,
+                "implied_tonic_name"      : nn(tonic_implied),
+                "roman_from"              : f"viio7 in {nn(key_from)} (LT={nn(lt)})",
+                "roman_to"                : f"viio7 in {nn(tonic_implied)} (LT={nn(lt)})",
+                "kk_stability_from"       : round(kk_from, 4),
+                "kk_stability_to"         : round(kk_to,   4),
+                "vl_to_dominant_of_target": vl_to_v,
+                "pivot_score"             : score,
+                "interpretation"          : (
+                    f"Dim7 {[nn(p) for p in pcs_list]}: respell LT {nn(lt)} -> "
+                    f"resolves to {nn(tonic_implied)}. "
+                    f"Any of the 4 notes can be LT of a different key."),
+            })
+
+    # (B) German Aug6 <-> Dom7 -----------------------------------------
+    ger_root  = (key_from + 8) % 12
+    ger_pcs   = sorted({ger_root, key_from % 12,
+                        (key_from + 3) % 12, (key_from + 6) % 12})
+    dom7_key  = (key_from + 1) % 12
+    kk_from_g = tonal_hierarchy_score(ger_pcs, key_from)["kk_normalized"]
+    kk_to_g   = tonal_hierarchy_score(ger_pcs, key_to  )["kk_normalized"]
+    vl_ger    = orbifold_voice_leading(ger_pcs, triad_pcs((key_to+7)%12,'maj'))["distance"]
+    ten_from_g= tonnetz_tension(ger_pcs, key_from, include_psychoacoustic=False)["tension"]
+    ten_to_g  = tonnetz_tension(ger_pcs, key_to,   include_psychoacoustic=False)["tension"]
+    score_g   = _pivot_score(2, kk_from_g, kk_to_g, vl_ger, ten_from_g, ten_to_g)
+    results.append({
+        "type"                    : "enharmonic_german_aug6",
+        "pcs"                     : ger_pcs,
+        "label"                   : f"Ger+6/{nn(key_from)} = {nn(ger_root)}7",
+        "root"                    : ger_root,
+        "roman_from"              : f"Ger+6 (bVI aug6th in {nn(key_from)})",
+        "roman_to"                : f"V7 in {nn(dom7_key)} (enharmonic Dom7)",
+        "dom7_resolves_to_key"    : nn(dom7_key),
+        "kk_stability_from"       : round(kk_from_g, 4),
+        "kk_stability_to"         : round(kk_to_g,   4),
+        "vl_to_dominant_of_target": vl_ger,
+        "pivot_score"             : score_g,
+        "interpretation"          : (
+            f"Ger+6 in {nn(key_from)} = pcs {[nn(p) for p in ger_pcs]}. "
+            f"Enharmonically = {nn(ger_root)}7 (dom7). "
+            f"As dom7 -> resolves to {nn(dom7_key)} major. "
+            f"Classic pivot: {nn(key_from)} major -> {nn(dom7_key)} major."),
+    })
+
+    # (C) Augmented triad ----------------------------------------------
+    aug_classes = [{0,4,8}, {1,5,9}, {2,6,10}]
+    for aug_set in aug_classes:
+        for root in sorted(aug_set):
+            for tonic_impl, role in [
+                    ((root - 4) % 12, 'III+'),
+                    ((root - 7) % 12, 'V+')]:
+                if tonic_impl not in {key_from, key_to}:
+                    continue
+                pcs_list = sorted(aug_set)
+                kk_from_a = tonal_hierarchy_score(pcs_list, key_from)["kk_normalized"]
+                kk_to_a   = tonal_hierarchy_score(pcs_list, key_to  )["kk_normalized"]
+                vl_a      = orbifold_voice_leading(
+                    pcs_list, triad_pcs((key_to+7)%12,'maj'))["distance"]
+                ten_from_a= tonnetz_tension(pcs_list, key_from, include_psychoacoustic=False)["tension"]
+                ten_to_a  = tonnetz_tension(pcs_list, key_to,   include_psychoacoustic=False)["tension"]
+                score_a   = _pivot_score(2, kk_from_a, kk_to_a, vl_a, ten_from_a, ten_to_a)
+                results.append({
+                    "type"                    : "enharmonic_augmented_triad",
+                    "pcs"                     : pcs_list,
+                    "label"                   : nn(root) + "+",
+                    "root"                    : root,
+                    "roman_from"              : roman_label(root, 'aug', key_from),
+                    "roman_to"                : roman_label(root, 'aug', key_to),
+                    "role"                    : role,
+                    "kk_stability_from"       : round(kk_from_a, 4),
+                    "kk_stability_to"         : round(kk_to_a,   4),
+                    "vl_to_dominant_of_target": vl_a,
+                    "pivot_score"             : score_a,
+                    "interpretation"          : (
+                        f"Aug triad {[nn(p) for p in pcs_list]} as {role}: "
+                        f"enharmonic pivot via equal-M3 division of octave."),
+                })
+
+    results.sort(key=lambda x: -x["pivot_score"])
+    return results
+
+
+# ── 9.7  Borrowed / modal-mixture pivots ──────────────────────────────────────
+
+def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+    """
+    Find chords that are *borrowed* in key_from (from any mode of that tonic)
+    but *diatonic* in key_to, or vice versa.
+
+    Searches all 7 modal rotations of key_from for chords not in Ionian(key_from)
+    that ARE present in Ionian(key_to).
+    """
+    inv_to  = _inventory_map(key_to, include_borrowed=False)
+    ionian_from = {frozenset(c['pcs']) for c in diatonic_chord_inventory(key_from)}
+    results = []
+
+    for mode_name in MODES:
+        mode_scale = diatonic_set(key_from, mode_name)
+        for i in range(7):
+            root  = mode_scale[i]
+            third = mode_scale[(i+2) % 7]
+            fifth = mode_scale[(i+4) % 7]
+            t_iv  = (third - root) % 12
+            f_iv  = (fifth - root) % 12
+            q     = _chord_quality_from_intervals(t_iv, f_iv)
+            pcs   = sorted({root, third, fifth})
+            pcs_fs= frozenset(pcs)
+
+            if pcs_fs in ionian_from:
+                continue
+            if pcs_fs not in inv_to:
+                continue
+
+            ct_info  = inv_to[pcs_fs]
+            kk_from  = tonal_hierarchy_score(pcs, key_from)["kk_normalized"]
+            kk_to    = ct_info["kk_stability"]
+            vl_to_v  = orbifold_voice_leading(
+                pcs, triad_pcs((key_to+7)%12,'maj'))["distance"]
+            ten_from = tonnetz_tension(pcs, key_from, include_psychoacoustic=False)["tension"]
+            ten_to   = ct_info["tension"]
+            score    = _pivot_score(len(pcs), kk_from, kk_to, vl_to_v, ten_from, ten_to)
+            rom_from = roman_label(root, q, key_from)
+
+            results.append({
+                "type"                    : "borrowed_pivot",
+                "pcs"                     : pcs,
+                "label"                   : nn(root) + ('' if q=='maj' else
+                                                        'm' if q=='min' else 'o'),
+                "root"                    : root,
+                "quality"                 : q,
+                "roman_from"              : rom_from,
+                "roman_to"                : ct_info["roman"],
+                "function_from"           : functional_analysis(pcs, key_from)["function"],
+                "function_to"             : ct_info["function"],
+                "source_mode"             : mode_name,
+                "kk_stability_from"       : round(kk_from, 4),
+                "kk_stability_to"         : round(kk_to, 4),
+                "vl_to_dominant_of_target": vl_to_v,
+                "tension_from"            : round(ten_from, 4),
+                "tension_to"              : round(ten_to,   4),
+                "pivot_score"             : score,
+                "interpretation"          : (
+                    f"{rom_from} borrowed from {nn(key_from)} {mode_name} "
+                    f"= {ct_info['roman']} diatonic in {nn(key_to)}."),
+            })
+
+    seen: Set[FrozenSet] = set()
+    unique = []
+    for r in sorted(results, key=lambda x: -x["pivot_score"]):
+        k = frozenset(r["pcs"])
+        if k not in seen:
+            seen.add(k); unique.append(r)
+    return unique[:12]
+
+
+# ── 9.8  Chromatic mediant pivots ─────────────────────────────────────────────
+
+def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+    """
+    BFS through the PLR Tonnetz graph from the tonic of key_from (depth <= 3).
+    Reports any intermediate chord that has a diatonic role in key_to or IS
+    the tonic/dominant of key_to.
+
+    Characteristic of late-Romantic chromatic mediant modulations (Schubert,
+    Brahms, Wagner) where keys related by M3 or m3 share at most 1 tone but
+    connect through smooth PLR voice-leading.
+    """
+    from collections import deque
+    results  = []
+    inv_to   = _inventory_map(key_to, include_borrowed=True)
+    v_of_to  = triad_pcs((key_to + 7) % 12, 'maj')
+
+    queue   = deque([(key_from % 12, 'maj', [])])
+    visited = {(key_from % 12, 'maj')}
+
+    while queue:
+        r, q, ops = queue.popleft()
+        if len(ops) >= 3:
+            continue
+        for op in ['P', 'L', 'R']:
+            nr, nq = PLR_OPS[op][0](r, q)
+            ns = (nr, nq)
+            if ns in visited:
+                continue
+            visited.add(ns)
+            new_ops  = ops + [op]
+            pcs      = triad_pcs(nr, nq)
+            pcs_fs   = frozenset(pcs)
+            role_to  = inv_to.get(pcs_fs)
+            is_tonic = sorted(pcs) == sorted(triad_pcs(key_to, 'maj'))
+            is_dom   = sorted(pcs) == sorted(v_of_to)
+
+            if role_to or is_tonic or is_dom:
+                kk_from  = tonal_hierarchy_score(pcs, key_from)["kk_normalized"]
+                kk_to    = (role_to["kk_stability"] if role_to else
+                            tonal_hierarchy_score(pcs, key_to)["kk_normalized"])
+                vl_cost  = orbifold_voice_leading(pcs, v_of_to)["distance"]
+                ten_from = tonnetz_tension(pcs, key_from, include_psychoacoustic=False)["tension"]
+                ten_to   = tonnetz_tension(pcs, key_to,   include_psychoacoustic=False)["tension"]
+                tn_kf    = tonnetz_projection_interval(key_from % 12)
+                tn_nr    = tonnetz_projection_interval(nr)
+                tn_dist  = math.sqrt((tn_kf[0]-tn_nr[0])**2 + (tn_kf[1]-tn_nr[1])**2)
+                score    = _pivot_score(3 - len(new_ops), kk_from, kk_to,
+                                        vl_cost, ten_from, ten_to)
+                roman_to = (role_to["roman"] if role_to else
+                            "I" if is_tonic else "V")
+                results.append({
+                    "type"                    : "chromatic_mediant",
+                    "pcs"                     : sorted(pcs),
+                    "label"                   : nn(nr) + ("" if nq=="maj" else "m"),
+                    "root"                    : nr,
+                    "quality"                 : nq,
+                    "plr_path"                : new_ops,
+                    "plr_path_str"            : "->".join(new_ops),
+                    "roman_from"              : roman_label(nr, nq, key_from),
+                    "roman_to"                : roman_to,
+                    "tonnetz_distance"        : round(tn_dist, 3),
+                    "kk_stability_from"       : round(kk_from, 4),
+                    "kk_stability_to"         : round(kk_to,   4),
+                    "vl_to_dominant_of_target": vl_cost,
+                    "tension_from"            : round(ten_from, 4),
+                    "tension_to"              : round(ten_to,   4),
+                    "pivot_score"             : score,
+                    "interpretation"          : (
+                        f"PLR {new_ops} from {nn(key_from)} tonic -> "
+                        f"{nn(nr)}{'m' if nq=='min' else ''} = {roman_to} "
+                        f"in {nn(key_to)} (Tonnetz dist {round(tn_dist,2)})."),
+                })
+            queue.append((nr, nq, new_ops))
+
+    results.sort(key=lambda x: -x["pivot_score"])
+    return results[:8]
+
+
+# ── 9.9  Key-distance helpers ──────────────────────────────────────────────────
+
+def cof_distance(key_a: int, key_b: int) -> int:
+    """
+    Steps on the circle of fifths between two keys (range 0-6).
+    C<->G = 1,  C<->F# = 6.
+    Each fifth = 7 semitones; inverse (mod 12): multiply by 7.
+    """
+    d        = abs((key_b - key_a) % 12)
+    cof_step = (d * 7) % 12
+    return min(cof_step, 12 - cof_step)
+
+def _cof_relationship(d: int) -> str:
+    return {0: "same key",
+            1: "closely related (1 step on CoF)",
+            2: "moderately related (2 steps)",
+            3: "distantly related (3 steps)",
+            4: "remote (4 steps)",
+            5: "very remote (5 steps)",
+            6: "tritone / maximally remote"}.get(d, "remote")
+
+def common_tones_between_keys(key_a: int, key_b: int) -> List[int]:
+    """Pitch classes diatonic in BOTH key_a and key_b (major scales)."""
+    return sorted(set(diatonic_set(key_a)) & set(diatonic_set(key_b)))
+
+
+# ── 9.10  Modulation path search (Dijkstra) ────────────────────────────────────
+
+def modulation_path_search(key_from: int, key_to: int,
+                           max_depth: int = 6) -> List[Dict[str, Any]]:
+    """
+    Dijkstra search for the minimum voice-leading cost modulation path:
+        I(key_from)  -->  [diatonic chords in key_from]
+                     -->  [pivot chord: diatonic in BOTH keys]
+                     -->  [diatonic chords in key_to]
+                     -->  I(key_to)
+
+    Graph nodes: diatonic triads of key_from + key_to (plus borrowed chords).
+    Edge weight: orbifold voice-leading distance between adjacent chords.
+    Pivot edge:  zero-cost reinterpretation when a chord is in both inventories.
+
+    The search enforces that the pivot is not taken on the very first step
+    (the music must first establish key_from) and the goal is to reach
+    the major tonic of key_to after the pivot.
+
+    State: (phase, root, quality)
+        phase 0 = still in key_from
+        phase 1 = crossed pivot, now in key_to
+    """
+    import heapq
+
+    inv_from_list = diatonic_chord_inventory(key_from, include_borrowed=True)
+    inv_to_list   = diatonic_chord_inventory(key_to,   include_borrowed=True)
+
+    from_map: Dict[Tuple[int,str], Dict] = {
+        (c["root"], c["quality"]): c for c in inv_from_list}
+    to_map:   Dict[Tuple[int,str], Dict] = {
+        (c["root"], c["quality"]): c for c in inv_to_list}
+
+    pivot_nodes: Set[Tuple[int,str]] = set(from_map) & set(to_map)
+
+    goal_ck  = (key_to % 12, 'maj')
+    start_ck = (key_from % 12, 'maj')
+
+    # heap: (total_vl_cost, phase, root, quality, path_list)
+    start_step = {
+        "root": key_from % 12, "quality": 'maj',
+        "label": nn(key_from),
+        "roman": "I", "key_context": "from",
+        "function": "TONIC",
+        "vl_from_prev": 0, "cumulative_cost": 0,
+    }
+    heap: List = [(0, 0, 0, key_from % 12, 'maj', [start_step])]
+    _cnt = [1]
+    visited: Set[Tuple[int, int, str]] = set()
+    best_path: Optional[List[Dict]] = None
+    best_cost = float('inf')
+
+    while heap:
+        cost, _seq, phase, cur_r, cur_q, path = heapq.heappop(heap)
+        state = (phase, cur_r, cur_q)
+        if state in visited or cost >= best_cost:
+            continue
+        visited.add(state)
+
+        cur_pcs = triad_pcs(cur_r, cur_q)
+        ck      = (cur_r, cur_q)
+
+        # Check goal
+        if phase == 1 and ck == goal_ck:
+            if cost < best_cost:
+                best_cost = cost; best_path = path
+            continue
+
+        if len(path) >= max_depth:
+            continue
+
+        if phase == 0:
+            # Move within key_from
+            for (nr, nq), ninfo in from_map.items():
+                if (0, nr, nq) in visited:
+                    continue
+                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq))["distance"]
+                new_cost = cost + vl
+                if new_cost >= best_cost:
+                    continue
+                step = {
+                    "root": nr, "quality": nq,
+                    "label": nn(nr) + ("" if nq=="maj" else "m"),
+                    "roman": ninfo["roman"], "key_context": "from",
+                    "function": ninfo["function"],
+                    "vl_from_prev": vl, "cumulative_cost": new_cost,
+                }
+                heapq.heappush(heap, (new_cost, _cnt[0], 0, nr, nq, path + [step])); _cnt[0]+=1
+
+            # Take pivot (must have played at least 2 chords in key_from)
+            if ck in pivot_nodes and len(path) >= 2:
+                pivot_step = dict(path[-1])
+                pivot_step["key_context"]       = "pivot"
+                pivot_step["roman_as_pivot_from"]= from_map[ck]["roman"]
+                pivot_step["roman_as_pivot_to"]  = to_map[ck]["roman"]
+                pivot_step["pivot_note"]         = (
+                    f"{from_map[ck]['roman']} in {nn(key_from)} "
+                    f"= {to_map[ck]['roman']} in {nn(key_to)}")
+                heapq.heappush(heap,
+                    (cost, _cnt[0], 1, cur_r, cur_q, path[:-1] + [pivot_step])); _cnt[0]+=1
+
+        elif phase == 1:
+            # Move within key_to
+            for (nr, nq), ninfo in to_map.items():
+                if (1, nr, nq) in visited:
+                    continue
+                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq))["distance"]
+                new_cost = cost + vl
+                if new_cost >= best_cost:
+                    continue
+                step = {
+                    "root": nr, "quality": nq,
+                    "label": nn(nr) + ("" if nq=="maj" else "m"),
+                    "roman": ninfo["roman"], "key_context": "to",
+                    "function": ninfo["function"],
+                    "vl_from_prev": vl, "cumulative_cost": new_cost,
+                }
+                heapq.heappush(heap, (new_cost, _cnt[0], 1, nr, nq, path + [step])); _cnt[0]+=1
+
+    return best_path or []
+
+
+# ── 9.11  Master pivot search ─────────────────────────────────────────────────
+
+def pivot_search(
+        key_from           : int,
+        key_to             : int,
+        include_borrowed   : bool = True,
+        include_secondaries: bool = True,
+        include_enharmonic : bool = True,
+        include_chromatic  : bool = True,
+        max_per_type       : int  = 6,
+) -> Dict[str, Any]:
+    """
+    Master pivot-chord search: runs all pivot-finding strategies and returns
+    a unified, de-duplicated, ranked result set.
+
+    Parameters
+    ----------
+    key_from / key_to  : integer pitch classes (0=C, 1=C#, ..., 11=B)
+    include_*          : toggle each pivot family
+    max_per_type       : cap results per family before merging
+
+    Returns
+    -------
+    {
+      key_from, key_to, key_from_name, key_to_name,
+      cof_distance, cof_relationship,
+      common_scale_tones, common_scale_names, n_common_tones,
+      diatonic_inventory_from, diatonic_inventory_to,
+      pivots_by_type: {
+        common_chord: [...],
+        secondary_dominant: [...],
+        enharmonic: [...],
+        borrowed: [...],
+        chromatic_mediant: [...]
+      },
+      all_pivots: [...],   # merged, de-duplicated, ranked by pivot_score
+      best_pivot: {...},   # highest scoring
+      modulation_path: [...]  # Dijkstra-optimal chord sequence
+    }
+    """
+    cof_d  = cof_distance(key_from, key_to)
+    common = common_tones_between_keys(key_from, key_to)
+
+    pivots_by_type: Dict[str, List] = {}
+
+    pivots_by_type["common_chord"] = common_chord_pivots(
+        key_from, key_to, include_borrowed=include_borrowed)[:max_per_type]
+
+    if include_secondaries:
+        pivots_by_type["secondary_dominant"] = secondary_dominant_pivots(
+            key_from, key_to)[:max_per_type]
+
+    if include_enharmonic:
+        pivots_by_type["enharmonic"] = enharmonic_pivots(
+            key_from, key_to)[:max_per_type]
+
+    if include_borrowed:
+        pivots_by_type["borrowed"] = borrowed_pivots(
+            key_from, key_to)[:max_per_type]
+
+    if include_chromatic:
+        pivots_by_type["chromatic_mediant"] = chromatic_mediant_pivots(
+            key_from, key_to)[:max_per_type]
+
+    # Merge and de-duplicate
+    seen_pcs: Set[FrozenSet] = set()
+    all_pivots: List[Dict]   = []
+    for type_pivots in pivots_by_type.values():
+        for p in type_pivots:
+            k = frozenset(p["pcs"])
+            if k not in seen_pcs:
+                seen_pcs.add(k); all_pivots.append(p)
+    all_pivots.sort(key=lambda x: -x["pivot_score"])
+
+    best = all_pivots[0] if all_pivots else None
+
+    # Modulation path
+    mod_path = modulation_path_search(key_from, key_to)
+
+    return {
+        "key_from"              : key_from,
+        "key_to"                : key_to,
+        "key_from_name"         : nn(key_from),
+        "key_to_name"           : nn(key_to),
+        "cof_distance"          : cof_d,
+        "cof_relationship"      : _cof_relationship(cof_d),
+        "common_scale_tones"    : common,
+        "common_scale_names"    : [nn(p) for p in common],
+        "n_common_tones"        : len(common),
+        "diatonic_inventory_from": [
+            {"roman": c["roman"], "label": c["label"], "pcs": c["pcs"],
+             "function": c["function"]}
+            for c in diatonic_chord_inventory(key_from)],
+        "diatonic_inventory_to": [
+            {"roman": c["roman"], "label": c["label"], "pcs": c["pcs"],
+             "function": c["function"]}
+            for c in diatonic_chord_inventory(key_to)],
+        "pivots_by_type"        : pivots_by_type,
+        "all_pivots"            : all_pivots,
+        "best_pivot"            : best,
+        "modulation_path"       : mod_path,
+    }
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # DISPATCH
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -1659,6 +2556,93 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
         if not pcs: pcs = triad_pcs(root, qual)
         return {"result": "set_class", **set_class_info(pcs)}
 
+    elif c == "pivot_search":
+        """
+        Full pivot-chord search between two keys.
+        Required: key_from (int pc), key_to (int pc)
+        Optional: include_borrowed, include_secondaries,
+                  include_enharmonic, include_chromatic (all bool, default True)
+                  max_per_type (int, default 6)
+        """
+        return {
+            "result": "pivot_search",
+            **pivot_search(
+                cmd.get("key_from", key),
+                cmd.get("key_to", 0),
+                include_borrowed    = cmd.get("include_borrowed",    True),
+                include_secondaries = cmd.get("include_secondaries", True),
+                include_enharmonic  = cmd.get("include_enharmonic",  True),
+                include_chromatic   = cmd.get("include_chromatic",   True),
+                max_per_type        = cmd.get("max_per_type", 6),
+            )
+        }
+
+    elif c == "diatonic_inventory":
+        """
+        List all diatonic chords (with optional borrowed) for a key.
+        Required: key (int pc)
+        Optional: mode (str, default Ionian), include_borrowed (bool),
+                  include_sevenths (bool)
+        """
+        return {
+            "result": "diatonic_inventory",
+            "key": key, "key_name": nn(key),
+            "mode": cmd.get("mode", "Ionian"),
+            "chords": diatonic_chord_inventory(
+                key,
+                mode             = cmd.get("mode", "Ionian"),
+                include_sevenths = cmd.get("include_sevenths", True),
+                include_borrowed = cmd.get("include_borrowed", False),
+            )
+        }
+
+    elif c == "common_chord_pivots":
+        """
+        Find chords diatonic in both key_from and key_to.
+        Required: key_from, key_to
+        """
+        return {
+            "result"  : "common_chord_pivots",
+            "key_from": cmd.get("key_from", 0),
+            "key_to"  : cmd.get("key_to", 0),
+            "pivots"  : common_chord_pivots(
+                cmd.get("key_from", 0),
+                cmd.get("key_to",   0),
+                include_borrowed = cmd.get("include_borrowed", True),
+            )
+        }
+
+    elif c == "modulation_path":
+        """
+        Dijkstra-optimal modulation path from I(key_from) to I(key_to).
+        Required: key_from, key_to
+        Optional: max_depth (int, default 6)
+        """
+        return {
+            "result"  : "modulation_path",
+            "key_from": cmd.get("key_from", 0),
+            "key_to"  : cmd.get("key_to",   0),
+            "path"    : modulation_path_search(
+                cmd.get("key_from", 0),
+                cmd.get("key_to",   0),
+                max_depth = cmd.get("max_depth", 6),
+            )
+        }
+
+    elif c == "roman_numeral":
+        """
+        Compute Roman numeral for a chord relative to a key.
+        Required: root (int pc), quality (str), key (int pc)
+        """
+        return {
+            "result"       : "roman_numeral",
+            "root"         : root,
+            "quality"      : qual,
+            "key"          : key,
+            "roman"        : roman_label(root, qual, key),
+            "degree_semitones": (root - key) % 12,
+        }
+
     elif c == "ping":
         return {
             "result": "pong", "status": "ok",
@@ -1667,14 +2651,22 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 "functional_analysis", "voice_leading_orbifold",
                 "tonnetz_tension_hybrid", "pattern_recognition",
                 "edo_ji_lattice", "voice_completion_psychoacoustic",
+                "pivot_search",
             ],
             "psychoacoustic_commands": [
-                "psychoacoustic_analysis",  # full 3-level cortex model
-                "spectral_roughness",       # Sethares + IHC roughness
-                "virtual_pitch",            # Terhardt SHS
-                "masking_analysis",         # Moore & Glasberg masking
-                "roughness_curve",          # Plomp-Levelt curve
-                "tonal_hierarchy",          # Krumhansl-Kessler KK profiles
+                "psychoacoustic_analysis",
+                "spectral_roughness",
+                "virtual_pitch",
+                "masking_analysis",
+                "roughness_curve",
+                "tonal_hierarchy",
+            ],
+            "pivot_commands": [
+                "pivot_search",           # full search (all families)
+                "common_chord_pivots",    # shared diatonic membership
+                "modulation_path",        # Dijkstra path I->pivot->I
+                "diatonic_inventory",     # chord inventory for a key
+                "roman_numeral",          # Roman numeral labeling
             ],
         }
 
