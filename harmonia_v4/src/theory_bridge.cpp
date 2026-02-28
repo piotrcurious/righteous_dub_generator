@@ -273,7 +273,7 @@ void TheoryBridge::queryPivotSearch(int key_from, int key_to, PivotSearchCb cb) 
         // Parse all_pivots
         size_t ap = resp.find("\"all_pivots\"");
         if (ap != std::string::npos) {
-            size_t as = resp.find('[', ap), ae = resp.find(']', as);
+            size_t as = resp.find('[', ap);
             // This simple parser might fail on nested arrays, but splitJsonArray helps
             if (as != std::string::npos) {
                 // Find matching ] for the array

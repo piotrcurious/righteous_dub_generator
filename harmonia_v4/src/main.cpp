@@ -1603,13 +1603,13 @@ void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
         }
     } else if (val > 0 && val <= (int)app->instrument_keyboard_.size()) {
         const auto& ck = app->instrument_keyboard_[val - 1];
-        if (ck.pcs.size() > 0) app->highlightNodeForPC(ck.pcs[0]);
+        if (!ck.notes.empty()) app->highlightNodeForPC(ck.notes[0].pc, ck.notes[0].tx, ck.notes[0].ty);
         if (Fl::event_clicks()) {
             Fl::event_clicks(0);
             app->playChord(ck, true);
         }
     } else {
-        app->tonnetz_->setHighlightedPC(-1);
+        app->highlightNodeForPC(-1);
     }
 }
 
