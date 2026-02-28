@@ -229,7 +229,12 @@ private:
     // Instrument Builder
     struct ChordKey {
         std::string name;
-        std::vector<int> pcs;
+        struct Note {
+            int pc;
+            double freq;
+            int tx, ty;
+        };
+        std::vector<Note> notes;
     };
     std::vector<ChordKey> instrument_keyboard_;
     Fl_Browser* browser_keys_{nullptr};
@@ -956,11 +961,14 @@ std::pair<int,int> HarmoniaApp::highlightNodeForPC(int pc, int tx, int ty) {
 
 void HarmoniaApp::onTonnetzClick(int pitch_class, int tx, int ty) {
     tonnetz_->setHighlightedNode(tx, ty);
-    // pitch_class is 0..edo-1. Map to nearest MIDI note + detune.
-    int base_octave = (int)sp_base_octave_->value();
-    double cents = (double)pitch_class * 1200.0 / current_edo_;
-    int closest_midi = base_octave * 12 + 12 + (int)std::round(cents / 100.0);
-    float detune = (float)(cents - (closest_midi - (base_octave * 12 + 12)) * 100.0);
+
+    // Calculate frequency based on lattice position quantized to EDO
+    int fifth_steps = (int)std::round(std::log2(1.5) * current_edo_);
+    int third_steps = (int)std::round(std::log2(1.25) * current_edo_);
+    int total_steps = tx * fifth_steps + ty * third_steps;
+
+    // C4 (261.63Hz) is the reference at origin (0,0)
+    double freq = 261.625565 * std::pow(2.0, (double)total_steps / current_edo_);
 
     last_clicked_root_ = pitch_class;
     auto voices = audio_->getVoiceSnapshot();
@@ -975,17 +983,15 @@ void HarmoniaApp::onTonnetzClick(int pitch_class, int tx, int ty) {
     if (existing_id != -1) {
         removeVoice(existing_id);
     } else {
-        addVoice(closest_midi, TimbrePreset::SINE, tx, ty);
-        if (!strips_.empty()) {
-            VoiceStrip* s = strips_.back();
-            s->manual = true; // Manually placed notes stay until removed
-            int newid = s->voice_id;
-            audio_->setVoiceDetune(newid, detune);
-            if (auto* fs = findStrip(newid)) {
-                fs->sl_detune->value(detune);
-                fs->btn_on->value(1);
+        int id = audio_->addVoice(60, TimbrePreset::SINE);
+        if (id >= 0) {
+            audio_->setVoiceFrequency(id, freq);
+            audio_->setVoiceTonnetzCoords(id, tx, ty);
+            audio_->noteOn(id);
+            if (auto* s = findStrip(id)) {
+                s->manual = true;
+                s->btn_on->value(1);
             }
-            audio_->noteOn(newid);
         }
     }
 
@@ -1470,7 +1476,20 @@ void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
             Fl::event_clicks(0);
             ChordKey ck;
             ck.name = p.label;
-            ck.pcs  = p.pcs;
+            for (int pc : p.pcs) {
+                ChordKey::Note note;
+                note.pc = pc;
+                int tx=0, ty=0;
+                for (const auto& node : app->tonnetz_->nodes()) {
+                    if (node.pitch_class == pc) { tx=node.x; ty=node.y; break; }
+                }
+                note.tx = tx; note.ty = ty;
+                int fifth_steps = (int)std::round(std::log2(1.5) * app->current_edo_);
+                int third_steps = (int)std::round(std::log2(1.25) * app->current_edo_);
+                int total_steps = tx * fifth_steps + ty * third_steps;
+                note.freq = 261.625565 * std::pow(2.0, (double)total_steps / app->current_edo_);
+                ck.notes.push_back(note);
+            }
             app->playChord(ck, true);
         }
     } else {
@@ -1531,15 +1550,17 @@ void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
     ChordKey ck;
     ck.name = obj.chord_name != "—" ? obj.chord_name : "Cluster";
     for (auto& v : voices) {
-        if (v.note_on.load())
-            ck.pcs.push_back(v.pitch_class);
+        if (v.note_on.load()) {
+            ChordKey::Note n;
+            n.pc = v.pitch_class;
+            n.freq = v.frequency;
+            n.tx = v.tonnetz_x;
+            n.ty = v.tonnetz_y;
+            ck.notes.push_back(n);
+        }
     }
 
-    // Sort and deduplicate PCs
-    std::sort(ck.pcs.begin(), ck.pcs.end());
-    ck.pcs.erase(std::unique(ck.pcs.begin(), ck.pcs.end()), ck.pcs.end());
-
-    if (ck.pcs.empty()) return;
+    if (ck.notes.empty()) return;
 
     app->instrument_keyboard_.push_back(ck);
 
@@ -1549,11 +1570,11 @@ void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
     app->browser_keys_->add(buf);
     app->browser_keys_->data(app->browser_keys_->size(), (void*)(intptr_t)kidx);
 
-    for (int pc : ck.pcs) {
+    for (const auto& note : ck.notes) {
         char nbuf[64];
-        snprintf(nbuf, sizeof(nbuf), "    • %s", NOTE_NAMES[pc%12]);
+        snprintf(nbuf, sizeof(nbuf), "    • %s", NOTE_NAMES[note.pc%12]);
         app->browser_keys_->add(nbuf);
-        app->browser_keys_->data(app->browser_keys_->size(), (void*)(intptr_t)(pc + 1000));
+        app->browser_keys_->data(app->browser_keys_->size(), (void*)(intptr_t)(note.pc + 1000));
     }
 }
 
@@ -1593,44 +1614,37 @@ void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
 }
 
 void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
-    // Collect active pitch classes to avoid redundant noteOffs
-    std::vector<int> target_pcs = chord.pcs;
     auto voices = audio_->getVoiceSnapshot();
 
     // Turn off voices not in the target chord if not sustaining
     if (!sustain) {
         for (auto& v : voices) {
             bool in_target = false;
-            for (int pc : target_pcs) if (v.pitch_class == pc) { in_target = true; break; }
+            for (const auto& n : chord.notes) {
+                if (v.tonnetz_x == n.tx && v.tonnetz_y == n.ty) { in_target = true; break; }
+            }
             if (!in_target) audio_->noteOff(v.id);
         }
     }
 
-    for (int pc : target_pcs) {
+    for (const auto& n : chord.notes) {
         bool found = false;
         for (auto& v : voices) {
-            if (v.pitch_class == pc) {
+            if (v.tonnetz_x == n.tx && v.tonnetz_y == n.ty) {
                 audio_->noteOn(v.id);
                 found = true;
                 break;
             }
         }
         if (!found) {
-            // Map to nearest MIDI note
-            int base_octave = (int)sp_base_octave_->value();
-            double cents = (double)pc * 1200.0 / current_edo_;
-            int closest_midi = base_octave * 12 + 12 + (int)std::round(cents / 100.0);
-            float detune = (float)(cents - (closest_midi - (base_octave * 12 + 12)) * 100.0);
-
-            // We use the app-level addVoice so it creates the UI strip too
-            addVoice(closest_midi, TimbrePreset::SINE);
-            if (!strips_.empty()) {
-                int newid = strips_.back()->voice_id;
-                audio_->setVoiceDetune(newid, detune);
-                audio_->noteOn(newid);
-                if (auto* s = findStrip(newid)) {
-                    s->sl_detune->value(detune);
+            int id = audio_->addVoice(60, TimbrePreset::SINE);
+            if (id >= 0) {
+                audio_->setVoiceFrequency(id, n.freq);
+                audio_->setVoiceTonnetzCoords(id, n.tx, n.ty);
+                audio_->noteOn(id);
+                if (auto* s = findStrip(id)) {
                     s->btn_on->value(1);
+                    s->manual = true;
                 }
             }
         }
@@ -1642,9 +1656,9 @@ void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
 
 void HarmoniaApp::releaseChord(const ChordKey& chord) {
     auto voices = audio_->getVoiceSnapshot();
-    for (int pc : chord.pcs) {
+    for (const auto& n : chord.notes) {
         for (auto& v : voices) {
-            if (v.pitch_class == pc) {
+            if (v.tonnetz_x == n.tx && v.tonnetz_y == n.ty) {
                 audio_->noteOff(v.id);
                 break;
             }
@@ -1710,7 +1724,20 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
             Fl::event_clicks(0);
             ChordKey ck;
             ck.name = rp.target_label;
-            ck.pcs = rp.target_pcs;
+            for (int pc : rp.target_pcs) {
+                ChordKey::Note note;
+                note.pc = pc;
+                int tx=0, ty=0;
+                for (const auto& node : app->tonnetz_->nodes()) {
+                    if (node.pitch_class == pc) { tx=node.x; ty=node.y; break; }
+                }
+                note.tx = tx; note.ty = ty;
+                int fifth_steps = (int)std::round(std::log2(1.5) * app->current_edo_);
+                int third_steps = (int)std::round(std::log2(1.25) * app->current_edo_);
+                int total_steps = tx * fifth_steps + ty * third_steps;
+                note.freq = 261.625565 * std::pow(2.0, (double)total_steps / app->current_edo_);
+                ck.notes.push_back(note);
+            }
             app->playChord(ck, true);
         }
     } else {
