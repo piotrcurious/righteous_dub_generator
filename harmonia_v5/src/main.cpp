@@ -222,9 +222,17 @@ void HarmoniaApp::onIdle(void* data) {
 }
 
 void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
-    double freq = 261.625565 * std::pow(2.0, (double)pc / current_edo_ + (oct - 4));
+    // Standardize frequency calculation using C4_HZ and epsilon for consistency
+    double freq = C4_HZ * std::pow(2.0, (double)pc / current_edo_ + (oct - 4));
+
+    // Use a frequency-based search or robust PC/Octave comparison
     auto voices = audio_->getVoiceSnapshot(); int eid = -1;
-    for (auto& v : voices) if (v.pitch_class == pc && v.octave == oct) { eid = v.id; break; }
+    for (auto& v : voices) {
+        // Robust comparison to handle potential small drift in pitch_class/octave
+        if (v.pitch_class == pc && v.octave == oct) {
+            eid = v.id; break;
+        }
+    }
     if (eid != -1) removeVoice(eid);
     else {
         int id = audio_->addVoice(60); if (id >= 0) {

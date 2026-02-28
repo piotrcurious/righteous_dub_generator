@@ -74,8 +74,8 @@ def mod_abs_dist(a: int, b: int, modulus: int = 12) -> int:
 
 # ── 0.1  Frequency / perceptual-scale conversions ────────────────────────────
 
-def pc_to_hz(pc: int, octave: int = 4, c4_hz: float = 261.63) -> float:
-    """Pitch-class + octave → frequency in Hz.  PC 0 = C, octave 4 → 261.63 Hz."""
+def pc_to_hz(pc: int, octave: int = 4, c4_hz: float = 261.625565) -> float:
+    """Pitch-class + octave → frequency in Hz.  PC 0 = C, octave 4 → 261.625565 Hz."""
     return c4_hz * 2.0 ** ((pc + (octave - 4) * 12) / 12.0)
 
 def midi_to_hz(midi: float) -> float:
@@ -249,7 +249,7 @@ def sethares_roughness(freqs: List[float], amps: List[float]) -> float:
 
 def chord_roughness_psychoacoustic(
         pitch_classes : List[int],
-        c4_hz         : float = 261.63,
+        c4_hz         : float = 261.625565,
         octave        : int   = 4,
         n_harmonics   : int   = 8,
         rolloff       : float = 0.88,
@@ -414,7 +414,7 @@ def an_rate_place_profile(freqs: List[float], amps: List[float],
 
 def virtual_pitch_strength(
         pitch_classes: List[int],
-        c4_hz        : float = 261.63,
+        c4_hz        : float = 261.625565,
         octave       : int   = 4,
         n_harmonics  : int   = 8,
 ) -> Dict[str, Any]:
@@ -518,7 +518,7 @@ def threshold_in_quiet(f: float) -> float:
             + 1e-3 * f_khz ** 4)
 
 def chord_masking_analysis(pitch_classes: List[int],
-                           c4_hz       : float = 261.63,
+                           c4_hz       : float = 261.625565,
                            level_db    : float = 70.0) -> Dict[str, Any]:
     """
     Psychoacoustic masking analysis for a chord.
@@ -628,7 +628,7 @@ def tonal_hierarchy_score(pitch_classes: List[int], key: int,
 def auditory_cortex_model(
         pitch_classes: List[int],
         key          : int   = 0,
-        c4_hz        : float = 261.63,
+        c4_hz        : float = 261.625565,
         octave       : int   = 4,
         level_db     : float = 70.0,
         n_harmonics  : int   = 8,
@@ -1425,7 +1425,7 @@ def edo_analysis(edo: int) -> Dict[str, Any]:
 
 def suggest_completion(pitch_classes: List[int], key: int,
                        edo: int = 12,
-                       c4_hz: float = 261.63) -> List[Dict[str, Any]]:
+                       c4_hz: float = 261.625565) -> List[Dict[str, Any]]:
     """
     Suggest pitch classes to add to the existing chord, scored using the full
     psychoacoustic model (Sethares roughness + Terhardt virtual pitch +
@@ -2421,7 +2421,7 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
     pcs  = cmd.get("pcs", [])
     root = cmd.get("root", pcs[0] if pcs else 0)
     qual = cmd.get("quality", "maj")
-    c4hz = cmd.get("c4_hz", 261.63)
+    c4hz = cmd.get("c4_hz", 261.625565)
 
     if c == "analyze_chord":
         if not pcs: pcs = triad_pcs(root, qual)
@@ -2434,7 +2434,7 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
     elif c == "psychoacoustic_analysis":
         """
         Full three-level auditory cortex analysis of a chord.
-        Accepts: pcs, key, c4_hz (default 261.63), octave (default 4),
+        Accepts: pcs, key, c4_hz (default 261.625565), octave (default 4),
                  level_db (default 70), n_harmonics (default 8)
         """
         octave     = cmd.get("octave", 4)
@@ -2480,10 +2480,10 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
     elif c == "roughness_curve":
         """
         Plomp-Levelt roughness curve centred at a reference frequency.
-        Accepts: ref_hz (default 261.63), n_points (default 150)
+        Accepts: ref_hz (default 261.625565), n_points (default 150)
         Returns list of {delta_hz, roughness} for plotting.
         """
-        ref_hz  = cmd.get("ref_hz", 261.63)
+        ref_hz  = cmd.get("ref_hz", 261.625565)
         n_pts   = cmd.get("n_points", 150)
         curve   = plomp_levelt_curve_at_f(ref_hz, n_pts)
         return {"result": "roughness_curve", "ref_hz": ref_hz,

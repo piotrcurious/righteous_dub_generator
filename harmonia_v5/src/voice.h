@@ -17,6 +17,7 @@
 
 constexpr int MAX_HARMONICS = 16;
 constexpr double SAMPLE_RATE = 44100.0;
+constexpr double C4_HZ = 261.625565;
 
 enum class TimbrePreset {
     SINE,       // only fundamental
@@ -151,10 +152,11 @@ struct Voice {
             );
         }
 
-        double logf = std::log2(f_actual / 261.625565); // Relative to C4
-        octave = 4 + (int)std::floor(logf);
-        logf = logf - std::floor(logf); // mod octave
-        pitch_class = (int)std::round(logf * edo) % edo;
+        double logf = std::log2(f_actual / C4_HZ); // Relative to C4
+        // Add a small epsilon to handle precision issues near octave boundaries
+        octave = 4 + (int)std::floor(logf + 1e-9);
+        double pc_fraction = logf + 1e-9 - std::floor(logf + 1e-9);
+        pitch_class = (int)std::round(pc_fraction * edo) % edo;
 
         if (update_coords) computeTonnetzCoords();
     }
@@ -211,14 +213,14 @@ struct Voice {
     void computeTonnetzCoords() {
         // project log2(f/C4) onto fifth (log2(3/2)) and third (log2(5/4)) axes
         // solving: a·log2(3/2) + b·log2(5/4) ≡ log2(f / reference)  mod 1
-        double logf = std::log2(frequency / 261.63);
-        logf = logf - std::floor(logf); // mod octave
+        double logf = std::log2(frequency / C4_HZ);
+        logf = logf - std::floor(logf + 1e-9); // mod octave
         // grid search over (a,b) in [-5,5]x[-3,3]
         double best = 1e9;
         for (int a = -5; a <= 5; a++) {
             for (int b = -3; b <= 3; b++) {
                 double val = a * std::log2(3.0/2.0) + b * std::log2(5.0/4.0);
-                val = val - std::floor(val);
+                val = val - std::floor(val + 1e-9);
                 double diff = std::min(std::abs(val - logf),
                              std::min(std::abs(val - logf + 1),
                                       std::abs(val - logf - 1)));

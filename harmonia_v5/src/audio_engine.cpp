@@ -335,7 +335,7 @@ float AudioEngine::pairRoughness(const Voice& a, const Voice& b) {
 void AudioEngine::computeVirtualPitch(AbstractObject& obj) {
     // Build amplitude spectrum on a log-frequency grid
     constexpr int N = 1024;
-    constexpr float F_MIN = 30.f, F_MAX = 4000.f;
+    constexpr float F_MIN = 20.f, F_MAX = 5000.f;
     static float spectrum[N] = {};
     memset(spectrum, 0, sizeof(spectrum));
 
