@@ -327,6 +327,13 @@ HarmoniaApp::HarmoniaApp() {
     audio_  = std::make_unique<AudioEngine>();
     theory_ = std::make_unique<TheoryBridge>();
     buildUI();
+
+    // Sync initial EDO and Key from widgets
+    current_edo_ = (int)sp_edo_->value();
+    current_key_ = ch_key_->value();
+    tonnetz_->setEDO(current_edo_);
+    audio_->setEDO(current_edo_);
+
     setupCallbacks();
 }
 
@@ -962,12 +969,15 @@ std::pair<int,int> HarmoniaApp::highlightNodeForPC(int pc, int tx, int ty) {
 void HarmoniaApp::onTonnetzClick(int pitch_class, int tx, int ty) {
     tonnetz_->setHighlightedNode(tx, ty);
 
-    // Fixed 12-tone topology for node frequencies
-    int pc12 = ((tx * 7 + ty * 4) % 12 + 12) % 12;
-    // Map to nearest step in current EDO
-    int steps = (int)std::round(pc12 * current_edo_ / 12.0);
+    // Pure JI frequency for node (tx, ty)
+    double ratio = std::pow(1.5, tx) * std::pow(1.25, ty);
+    double logf = std::log2(ratio);
+    logf = logf - std::floor(logf); // octave reduce to [0, 1)
 
-    // C4 (261.63Hz) is the reference at origin (0,0)
+    // Map to nearest EDO step
+    int steps = (int)std::round(logf * current_edo_);
+
+    // C4 (261.625565 Hz) is the reference at origin (0,0)
     double freq = 261.625565 * std::pow(2.0, (double)steps / current_edo_);
 
     last_clicked_root_ = pitch_class;
@@ -1484,8 +1494,10 @@ void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
                     if (node.pitch_class == pc) { tx=node.x; ty=node.y; break; }
                 }
                 note.tx = tx; note.ty = ty;
-                int pc12 = ((tx * 7 + ty * 4) % 12 + 12) % 12;
-                int steps = (int)std::round(pc12 * app->current_edo_ / 12.0);
+                double ratio = std::pow(1.5, tx) * std::pow(1.25, ty);
+                double logf = std::log2(ratio);
+                logf = logf - std::floor(logf);
+                int steps = (int)std::round(logf * app->current_edo_);
                 note.freq = 261.625565 * std::pow(2.0, (double)steps / app->current_edo_);
                 ck.notes.push_back(note);
             }
@@ -1731,8 +1743,10 @@ void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
                     if (node.pitch_class == pc) { tx=node.x; ty=node.y; break; }
                 }
                 note.tx = tx; note.ty = ty;
-                int pc12 = ((tx * 7 + ty * 4) % 12 + 12) % 12;
-                int steps = (int)std::round(pc12 * app->current_edo_ / 12.0);
+                double ratio = std::pow(1.5, tx) * std::pow(1.25, ty);
+                double logf = std::log2(ratio);
+                logf = logf - std::floor(logf);
+                int steps = (int)std::round(logf * app->current_edo_);
                 note.freq = 261.625565 * std::pow(2.0, (double)steps / app->current_edo_);
                 ck.notes.push_back(note);
             }

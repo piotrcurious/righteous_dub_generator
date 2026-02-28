@@ -126,10 +126,13 @@ private:
     void drawLine(float x1,float y1, float x2,float y2, float r,float g,float b,float lw=1.f);
 
     int pcFromCoord(int gx, int gy) const {
-        // Fixed 12-tone topology: Fifth = 7 steps, Third = 4 steps
-        int pc12 = ((gx * 7 + gy * 4) % 12 + 12) % 12;
-        // Map 12-tone pitch class to the nearest step in current EDO
-        return (int)std::round(pc12 * edo_ / 12.0) % edo_;
+        // Generalized Generator Lattice:
+        // x = Fifths, y = Major Thirds (EDO approximations)
+        int g1 = (int)std::round(edo_ * std::log2(1.5));
+        int g2 = (int)std::round(edo_ * std::log2(1.25));
+        int steps = (gx * g1 + gy * g2) % edo_;
+        if (steps < 0) steps += edo_;
+        return steps;
     }
 
     bool gl_inited_{false};

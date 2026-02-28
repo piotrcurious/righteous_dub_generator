@@ -207,21 +207,19 @@ struct Voice {
         if (peak > 0.f) for (float& a : harmonic_amp) a /= peak;
     }
 
-    // ────── map frequency to nearest Tonnetz coords (Fixed 12-tone topology)
+    // ────── map frequency to nearest Tonnetz coords (5-limit JI lattice)
     void computeTonnetzCoords() {
-        // Project log2(f/C4) onto the standard 12-EDO fifths and thirds axes
-        // for a consistent UI layout regardless of the actual EDO tuning.
+        // Project log2(f/C4) onto JI fifth (log2(3/2)) and third (log2(5/4)) axes
         double logf = std::log2(frequency / 261.63);
         logf = logf - std::floor(logf); // mod octave
 
-        // Use 12-EDO intervals as the topological basis
-        double fifth_12 = 7.0 / 12.0;
-        double third_12 = 4.0 / 12.0;
+        double fifth_ji = std::log2(1.5);
+        double third_ji = std::log2(1.25);
 
         double best = 1e9;
-        for (int a = -5; a <= 5; a++) {
-            for (int b = -3; b <= 3; b++) {
-                double val = a * fifth_12 + b * third_12;
+        for (int a = -10; a <= 10; a++) {
+            for (int b = -6; b <= 6; b++) {
+                double val = a * fifth_ji + b * third_ji;
                 val = val - std::floor(val);
                 double diff = std::min(std::abs(val - logf),
                              std::min(std::abs(val - logf + 1),
