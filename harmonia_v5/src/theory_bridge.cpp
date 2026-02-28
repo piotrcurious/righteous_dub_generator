@@ -98,12 +98,12 @@ std::string TheoryBridge::sendSync(const std::string& json, int timeout_ms) {
 // ────────────────────────────────────────────────────────────────────────────
 //  Public structural queries
 // ────────────────────────────────────────────────────────────────────────────
-void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int edo,
+void TheoryBridge::queryAnalyzeChord(const std::vector<float>& freqs, int key, int edo,
                                       FunctionCb cb) {
     std::string arr = "[";
-    for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
+    for (size_t i=0;i<freqs.size();i++) { arr+=std::to_string(freqs[i]); if(i+1<freqs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord\",\"pcs\":" + arr +
+    std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord\",\"freqs\":" + arr +
                        ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         FunctionalAnalysis fa;
@@ -201,6 +201,23 @@ void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, in
     sendRaw(json);
 }
 
+void TheoryBridge::queryPsychoacoustic(const std::vector<float>& freqs, int key,
+                                       float level_db, int edo,
+                                       PsychoacousticCb cb) {
+    std::string arr = "[";
+    for (size_t i=0;i<freqs.size();i++) { arr+=std::to_string(freqs[i]); if(i+1<freqs.size()) arr+=","; }
+    arr += "]";
+    std::string json = "{\"cmd\":\"psychoacoustic_analysis\",\"tag\":\"psychoacoustic\",\"freqs\":" + arr +
+                       ",\"key\":" + std::to_string(key) + ",\"level_db\":" + std::to_string(level_db) +
+                       ",\"edo\":" + std::to_string(edo) + "}";
+    auto raw_cb = [cb](const std::string& resp) {
+        if (cb) cb(parsePsychoacoustic(resp));
+    };
+    { std::lock_guard<std::mutex> lk(pending_mutex_);
+      pending_cbs_.push_back({"psychoacoustic", raw_cb}); }
+    sendRaw(json);
+}
+
 void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key, int edo,
                                            CompletionCb cb) {
     std::string arr = "[";
@@ -237,6 +254,92 @@ void TheoryBridge::queryOrbifoldDistance(const std::vector<int>& a,
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
       pending_cbs_.push_back({"orbifold_distance", raw_cb}); }
+    sendRaw(json);
+}
+
+void TheoryBridge::queryPivotSearch(int key_from, int key_to, PivotSearchCb cb) {
+    std::string json = "{\"cmd\":\"pivot_search\",\"tag\":\"pivot_search\",\"key_from\":" + std::to_string(key_from) +
+                       ",\"key_to\":" + std::to_string(key_to) + "}";
+    auto raw_cb = [this, cb](const std::string& resp) {
+        PivotSearchResult res;
+        res.key_from         = jInt(resp, "key_from");
+        res.key_to           = jInt(resp, "key_to");
+        res.key_from_name    = jStr(resp, "key_from_name");
+        res.key_to_name      = jStr(resp, "key_to_name");
+        res.cof_distance     = jInt(resp, "cof_distance");
+        res.cof_relationship = jStr(resp, "cof_relationship");
+        res.common_scale_tones = jIntArr(resp, "common_scale_tones");
+
+        // Parse all_pivots
+        size_t ap = resp.find("\"all_pivots\"");
+        if (ap != std::string::npos) {
+            size_t as = resp.find('[', ap);
+            // This simple parser might fail on nested arrays, but splitJsonArray helps
+            if (as != std::string::npos) {
+                // Find matching ] for the array
+                int depth = 0; size_t end = as;
+                for (size_t i=as; i<resp.size(); i++) {
+                    if (resp[i] == '[') depth++;
+                    else if (resp[i] == ']') {
+                        depth--;
+                        if (depth == 0) { end = i; break; }
+                    }
+                }
+                std::string arr_str = resp.substr(as + 1, end - as - 1);
+                for (auto& obj : splitJsonArray(arr_str)) {
+                    PivotChord pc;
+                    pc.type           = jStr(obj, "type");
+                    pc.pcs            = jIntArr(obj, "pcs");
+                    pc.label          = jStr(obj, "label");
+                    pc.root           = jInt(obj, "root");
+                    pc.quality        = jStr(obj, "quality");
+                    pc.roman_from     = jStr(obj, "roman_from");
+                    pc.roman_to       = jStr(obj, "roman_to");
+                    pc.function_from  = jStr(obj, "function_from");
+                    pc.function_to    = jStr(obj, "function_to");
+                    pc.pivot_score    = jFloat(obj, "pivot_score");
+                    pc.interpretation = jStr(obj, "interpretation");
+                    res.all_pivots.push_back(pc);
+                }
+            }
+        }
+
+        // Parse modulation_path
+        size_t mp = resp.find("\"modulation_path\"");
+        if (mp != std::string::npos) {
+            size_t as = resp.find('[', mp);
+            if (as != std::string::npos) {
+                int depth = 0; size_t end = as;
+                for (size_t i=as; i<resp.size(); i++) {
+                    if (resp[i] == '[') depth++;
+                    else if (resp[i] == ']') {
+                        depth--;
+                        if (depth == 0) { end = i; break; }
+                    }
+                }
+                std::string arr_str = resp.substr(as + 1, end - as - 1);
+                for (auto& obj : splitJsonArray(arr_str)) {
+                    ModulationStep s;
+                    s.root           = jInt(obj, "root");
+                    s.quality        = jStr(obj, "quality");
+                    s.label          = jStr(obj, "label");
+                    s.roman          = jStr(obj, "roman");
+                    s.key_context    = jStr(obj, "key_context");
+                    s.function       = jStr(obj, "function");
+                    s.vl_from_prev   = jInt(obj, "vl_from_prev");
+                    s.cumulative_cost= jInt(obj, "cumulative_cost");
+                    s.pivot_note     = jStr(obj, "pivot_note");
+                    s.roman_as_pivot_from = jStr(obj, "roman_as_pivot_from");
+                    s.roman_as_pivot_to   = jStr(obj, "roman_as_pivot_to");
+                    res.modulation_path.push_back(s);
+                }
+            }
+        }
+
+        if (cb) cb(res);
+    };
+    { std::lock_guard<std::mutex> lk(pending_mutex_);
+      pending_cbs_.push_back({"pivot_search", raw_cb}); }
     sendRaw(json);
 }
 
@@ -336,6 +439,22 @@ std::vector<int> TheoryBridge::jIntArr(const std::string& j, const std::string& 
     while (std::getline(iss, tok, ',')) {
         tok.erase(std::remove_if(tok.begin(), tok.end(), [](char c){ return isspace(c); }), tok.end());
         if (!tok.empty()) try { result.push_back(std::stoi(tok)); } catch(...) {}
+    }
+    return result;
+}
+
+std::vector<float> TheoryBridge::jFloatArr(const std::string& j, const std::string& k) {
+    std::vector<float> result;
+    size_t p = findValPos(j, k);
+    if (p == std::string::npos || j[p] != '[') return result;
+    size_t as = p, ae = j.find(']', as);
+    if (ae == std::string::npos) return result;
+    std::string arr = j.substr(as + 1, ae - as - 1);
+    std::istringstream iss(arr);
+    std::string tok;
+    while (std::getline(iss, tok, ',')) {
+        tok.erase(std::remove_if(tok.begin(), tok.end(), [](char c){ return isspace(c); }), tok.end());
+        if (!tok.empty()) try { result.push_back(std::stof(tok)); } catch(...) {}
     }
     return result;
 }
@@ -473,4 +592,107 @@ CompletionSuggestion TheoryBridge::parseCompletion(const std::string& j) {
     cs.completes_triad   = jBool(j,"completes_triad");
     cs.structural_reasons = jStrArr(j,"structural_reasons");
     return cs;
+}
+
+PsychoacousticAnalysis TheoryBridge::parsePsychoacoustic(const std::string& j) {
+    PsychoacousticAnalysis pa;
+
+    // Helper for finding nested objects
+    auto getSub = [](const std::string& json, const std::string& key) {
+        size_t p = json.find("\"" + key + "\"");
+        if (p == std::string::npos) return std::string("");
+        size_t s = json.find('{', p), e = s;
+        if (s == std::string::npos) return std::string("");
+        int depth = 1;
+        while (depth > 0 && ++e < json.size()) {
+            if (json[e] == '{') depth++;
+            else if (json[e] == '}') depth--;
+        }
+        return json.substr(s, e - s + 1);
+    };
+
+    std::string l1 = getSub(j, "level_1_peripheral");
+    if (!l1.empty()) {
+        pa.level1.roughness_normalized = jFloat(l1, "roughness_normalized");
+        pa.level1.consonance_score = jFloat(l1, "consonance_score");
+        pa.level1.masked_tones = jIntArr(l1, "masked_tones");
+        pa.level1.masked_tone_names = jStrArr(l1, "masked_tone_names");
+        pa.level1.note_frequencies_hz = jFloatArr(l1, "note_frequencies_hz");
+        // Parse roughness_per_pair
+        size_t rpa = l1.find("\"roughness_per_pair\"");
+        if (rpa != std::string::npos) {
+            size_t as = l1.find('[', rpa), ae = l1.find(']', as);
+            if (as != std::string::npos && ae != std::string::npos) {
+                for (auto& obj : splitJsonArray(l1.substr(as + 1, ae - as - 1))) {
+                    RoughnessPair rp;
+                    rp.pc_a = jInt(obj, "pc_a"); rp.pc_b = jInt(obj, "pc_b");
+                    rp.name_a = jStr(obj, "name_a"); rp.name_b = jStr(obj, "name_b");
+                    rp.roughness = jFloat(obj, "roughness");
+                    rp.interval_semitones = jInt(obj, "interval_semitones");
+                    pa.level1.roughness_per_pair.push_back(rp);
+                }
+            }
+        }
+        // Parse cb_overlaps
+        size_t cba = l1.find("\"cb_overlaps\"");
+        if (cba != std::string::npos) {
+            size_t as = l1.find('[', cba), ae = l1.find(']', as);
+            if (as != std::string::npos && ae != std::string::npos) {
+                for (auto& obj : splitJsonArray(l1.substr(as + 1, ae - as - 1))) {
+                    CBOverlap cbo;
+                    cbo.pc_a = jInt(obj, "pc_a"); cbo.pc_b = jInt(obj, "pc_b");
+                    cbo.interval_semitones = jInt(obj, "interval_semitones");
+                    cbo.delta_hz = jFloat(obj, "delta_hz");
+                    cbo.cb_overlap_fraction = jFloat(obj, "cb_overlap_fraction");
+                    cbo.bm_distance_mm = jFloat(obj, "bm_distance_mm");
+                    pa.level1.cb_overlaps.push_back(cbo);
+                }
+            }
+        }
+    }
+
+    std::string l2 = getSub(j, "level_2_brainstem");
+    if (!l2.empty()) {
+        pa.level2.virtual_pitch_hz = jFloat(l2, "virtual_pitch_hz");
+        pa.level2.virtual_pitch_name = jStr(l2, "virtual_pitch_name");
+        pa.level2.harmonicity = jFloat(l2, "harmonicity");
+        pa.level2.harmonicity_label = jStr(l2, "harmonicity_label");
+        pa.level2.an_peak_cf_hz = jFloat(l2, "an_peak_cf_hz");
+        pa.level2.an_peak_firing_rate = jFloat(l2, "an_peak_firing_rate");
+        // vp_top_candidates
+        size_t vpa = l2.find("\"vp_top_candidates\"");
+        if (vpa != std::string::npos) {
+            size_t as = l2.find('[', vpa), ae = l2.find(']', as);
+            if (as != std::string::npos && ae != std::string::npos) {
+                for (auto& obj : splitJsonArray(l2.substr(as + 1, ae - as - 1))) {
+                    VPCandidate vpc;
+                    vpc.f0_hz = jFloat(obj, "f0_hz"); vpc.pc = jInt(obj, "pc");
+                    vpc.name = jStr(obj, "name"); vpc.score = jFloat(obj, "score");
+                    pa.level2.vp_top_candidates.push_back(vpc);
+                }
+            }
+        }
+    }
+
+    std::string l3 = getSub(j, "level_3_cortical");
+    if (!l3.empty()) {
+        pa.level3.kk_tonal_stability = jFloat(l3, "kk_tonal_stability");
+        pa.level3.kk_stability_label = jStr(l3, "kk_stability_label");
+        pa.level3.kk_raw_score = jFloat(l3, "kk_raw_score");
+        pa.level3.spectral_centroid_hz = jFloat(l3, "spectral_centroid_hz");
+        pa.level3.spectral_centroid_pc = jInt(l3, "spectral_centroid_pc");
+        pa.level3.spectral_centroid_name = jStr(l3, "spectral_centroid_name");
+    }
+
+    pa.perceptual_tension = jFloat(j, "perceptual_tension");
+    pa.perceptual_tension_label = jStr(j, "perceptual_tension_label");
+
+    std::string tb = getSub(j, "tension_breakdown");
+    if (!tb.empty()) {
+        pa.tension_breakdown.roughness_component = jFloat(tb, "roughness_component");
+        pa.tension_breakdown.harmonicity_component = jFloat(tb, "harmonicity_component");
+        pa.tension_breakdown.tonal_component = jFloat(tb, "tonal_component");
+    }
+
+    return pa;
 }

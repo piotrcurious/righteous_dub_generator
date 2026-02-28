@@ -1,6 +1,6 @@
-# Harmonia — Psychoacoustic Multi-Voice Music Coder
+# Harmonia — Psychoacoustic Multi-Voice Music Coder (Version 5)
 
-A Linux FLTK/OpenGL application that demystifies tuning, harmony and voice-leading through the unified lens of **algebraic geometry**, **psychoacoustics** and **neural network / Markov chain** theory.
+A Linux FLTK/OpenGL application that demystifies tuning, harmony and voice-leading through the unified lens of **algebraic geometry**, **psychoacoustics** and **neural auditory cortex models**.
 
 ---
 
@@ -15,7 +15,7 @@ A Linux FLTK/OpenGL application that demystifies tuning, harmony and voice-leadi
 │  │  • ADSR      │  │  • 5-limit lattice   │  │  • Next chord │ │
 │  │  • Timbre    │  │  • Triad triangles   │  │  • Completion │ │
 │  │  • Detune    │  │  • Abstract objects  │  │  • EDO errors │ │
-│  │  • Roughness │  │  • Progression path  │  │  • Orbifold   │ │
+│  │  • Roughness │  │  • Progression path  │  │  • Neural Psy  │ │
 │  └──────┬───────┘  └─────────┬───────────┘  └───────┬───────┘ │
 │         │                    │                       │          │
 │  ┌──────▼────────────────────▼───────────────────────▼───────┐ │
@@ -26,12 +26,12 @@ A Linux FLTK/OpenGL application that demystifies tuning, harmony and voice-leadi
 └─────────────────────────────────────────────────────────────────┘
                         │  JSON / stdin-stdout
 ┌───────────────────────▼─────────────────────────────────────────┐
-│  Python Theory Server (subprocess)                              │
-│  • Markov chain progressions  (Bach chorales + jazz corpus)     │
+│  Python Theory Server (subprocess - server3.py)                 │
+│  • Neural Auditory Cortex Model (Peripheral/Brainstem/Cortical) │
 │  • 5/7-limit JI lattice navigation                              │
 │  • Tymoczko orbifold voice-leading distances                    │
-│  • EDO prime-error analysis                                     │
-│  • Roughness-minimizing completion suggestions                  │
+│  • Terhardt Subharmonic Summation (Virtual Pitch)               │
+│  • Krumhansl-Kessler Tonal Hierarchy Analysis                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

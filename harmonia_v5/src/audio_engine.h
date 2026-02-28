@@ -63,11 +63,12 @@ public:
     void shutdown();
 
     // ── voice management (call from UI thread, mutex-protected)
-    int  addVoice(int midi_note, TimbrePreset timbre = TimbrePreset::STRINGS);
+    int  addVoice(int midi_note, TimbrePreset timbre = TimbrePreset::SINE);
     void removeVoice(int voice_id);
     void noteOn(int voice_id);
     void noteOff(int voice_id);
     void setVoiceFrequency(int voice_id, double hz);
+    void setVoiceTonnetzCoords(int voice_id, int tx, int ty);
     void setVoiceAmplitude(int voice_id, float amp);
     void setVoiceTimbre(int voice_id, TimbrePreset t);
     void setVoiceDetune(int voice_id, float cents);

@@ -52,7 +52,25 @@ public:
         progression_path_ = path; redraw();
     }
 
-    void setHighlightedPC(int pc) { highlighted_pc_ = pc; redraw(); }
+    void setHighlightedPC(int pc) {
+        highlighted_pcs_.clear();
+        highlighted_node_x_ = highlighted_node_y_ = -100;
+        if (pc >= 0) highlighted_pcs_.push_back(pc);
+        redraw();
+    }
+    void setHighlightedPCs(const std::vector<int>& pcs) {
+        highlighted_pcs_ = pcs;
+        highlighted_node_x_ = highlighted_node_y_ = -100;
+        redraw();
+    }
+    void setHighlightedNode(int tx, int ty) {
+        highlighted_pcs_.clear();
+        highlighted_node_x_ = tx;
+        highlighted_node_y_ = ty;
+        redraw();
+    }
+
+    const std::vector<TonnetzNode>& nodes() const { return nodes_; }
 
     void draw() override;
     int  handle(int event) override;
@@ -69,7 +87,9 @@ private:
     AbstractObject            abs_obj_;
     std::vector<RoughnessRecord> roughness_;
     std::vector<std::pair<int,int>> progression_path_;
-    int highlighted_pc_{-1};
+    std::vector<int> highlighted_pcs_;
+    int              highlighted_node_x_{-100};
+    int              highlighted_node_y_{-100};
 
     // ── camera
     float pan_x_{0.f}, pan_y_{0.f};
@@ -106,11 +126,13 @@ private:
     void drawLine(float x1,float y1, float x2,float y2, float r,float g,float b,float lw=1.f);
 
     int pcFromCoord(int gx, int gy) const {
-        // In 12-EDO: Fifth = 7 steps, Third = 4 steps
-        // General EDO: find nearest integer steps for 3/2 and 5/4
-        int fifth_steps = (int)std::round(std::log2(1.5) * edo_);
-        int third_steps = (int)std::round(std::log2(1.25) * edo_);
-        return ((gx * fifth_steps + gy * third_steps) % edo_ + edo_) % edo_;
+        // Generalized Generator Lattice:
+        // x = Fifths, y = Major Thirds (EDO approximations)
+        int g1 = (int)std::round(edo_ * std::log2(1.5));
+        int g2 = (int)std::round(edo_ * std::log2(1.25));
+        int steps = (gx * g1 + gy * g2) % edo_;
+        if (steps < 0) steps += edo_;
+        return steps;
     }
 
     bool gl_inited_{false};

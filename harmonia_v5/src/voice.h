@@ -93,7 +93,7 @@ struct Voice {
         harmonic_phase_inc.fill(0.f);
         amplitude = 0.6f;
         attack_ms = 20.f; decay_ms = 80.f; sustain_level = 0.7f; release_ms = 300.f;
-        timbre = TimbrePreset::STRINGS;
+        timbre = TimbrePreset::SINE;
         setTimbre(timbre);
     }
 
@@ -142,7 +142,7 @@ struct Voice {
     Voice& operator=(Voice&& o) noexcept { return operator=(o); }
 
     // ────── set frequency and recompute phase increments
-    void setFrequency(double freq) {
+    void setFrequency(double freq, bool update_coords = true) {
         frequency = freq;
         double f_actual = freq * std::pow(2.0, detune_cents / 1200.0);
         for (int k = 1; k <= MAX_HARMONICS; k++) {
@@ -151,11 +151,12 @@ struct Voice {
             );
         }
 
-        double logf = std::log2(f_actual / 261.63); // Relative to C4
-        logf = logf - std::floor(logf); // mod octave
-        pitch_class = (int)std::round(logf * edo) % edo;
+        // For pitch class, we use the pure logf without detune for theoretical labeling
+        double logf_label = std::log2(freq / 261.63);
+        logf_label = logf_label - std::floor(logf_label); // mod octave
+        pitch_class = (int)std::round(logf_label * edo) % edo;
 
-        computeTonnetzCoords();
+        if (update_coords) computeTonnetzCoords();
     }
 
     // ────── set pitch by MIDI note number
@@ -206,17 +207,19 @@ struct Voice {
         if (peak > 0.f) for (float& a : harmonic_amp) a /= peak;
     }
 
-    // ────── map frequency to nearest Tonnetz coords (5-limit)
+    // ────── map frequency to nearest Tonnetz coords (5-limit JI lattice)
     void computeTonnetzCoords() {
-        // project log2(f/C4) onto fifth (log2(3/2)) and third (log2(5/4)) axes
-        // solving: a·log2(3/2) + b·log2(5/4) ≡ log2(f / reference)  mod 1
+        // Project log2(f/C4) onto JI fifth (log2(3/2)) and third (log2(5/4)) axes
         double logf = std::log2(frequency / 261.63);
         logf = logf - std::floor(logf); // mod octave
-        // grid search over (a,b) in [-5,5]x[-3,3]
+
+        double fifth_ji = std::log2(1.5);
+        double third_ji = std::log2(1.25);
+
         double best = 1e9;
-        for (int a = -5; a <= 5; a++) {
-            for (int b = -3; b <= 3; b++) {
-                double val = a * std::log2(3.0/2.0) + b * std::log2(5.0/4.0);
+        for (int a = -10; a <= 10; a++) {
+            for (int b = -6; b <= 6; b++) {
+                double val = a * fifth_ji + b * third_ji;
                 val = val - std::floor(val);
                 double diff = std::min(std::abs(val - logf),
                              std::min(std::abs(val - logf + 1),

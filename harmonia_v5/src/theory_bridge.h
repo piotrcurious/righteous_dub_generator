@@ -11,11 +11,81 @@
 #include <signal.h>
 
 // ────────────────────────────────────────────────────────────────────────────
-//  THEORY BRIDGE — structural edition
+//  THEORY BRIDGE — Psychoacoustic Edition
 //
-//  All queries now return algebraic structure, not probabilities.
-//  The API mirrors the Python server's command set.
+//  Integrates algebraic geometry with psychoacoustic neural models.
 // ────────────────────────────────────────────────────────────────────────────
+
+// ── Psychoacoustic data structures
+struct RoughnessPair {
+    int pc_a, pc_b;
+    std::string name_a, name_b;
+    float roughness;
+    int interval_semitones;
+};
+
+struct CBOverlap {
+    int pc_a, pc_b;
+    int interval_semitones;
+    float delta_hz;
+    float cb_overlap_fraction;
+    float bm_distance_mm;
+};
+
+struct ToneAudibility {
+    int pc;
+    std::string name;
+    float freq_hz;
+    float masking_threshold_db;
+    float sensation_level_db;
+    bool audible;
+};
+
+struct VPCandidate {
+    float f0_hz;
+    int pc;
+    std::string name;
+    float score;
+};
+
+struct PsychoacousticAnalysis {
+    struct {
+        float roughness_normalized;
+        float consonance_score;
+        std::vector<RoughnessPair> roughness_per_pair;
+        std::vector<int> masked_tones;
+        std::vector<std::string> masked_tone_names;
+        std::vector<CBOverlap> cb_overlaps;
+        std::vector<float> note_frequencies_hz;
+    } level1;
+
+    struct {
+        float virtual_pitch_hz;
+        std::string virtual_pitch_name;
+        float harmonicity;
+        std::string harmonicity_label;
+        std::vector<VPCandidate> vp_top_candidates;
+        float an_peak_cf_hz;
+        float an_peak_firing_rate;
+    } level2;
+
+    struct {
+        float kk_tonal_stability;
+        std::string kk_stability_label;
+        float kk_raw_score;
+        float spectral_centroid_hz;
+        int spectral_centroid_pc;
+        std::string spectral_centroid_name;
+    } level3;
+
+    float perceptual_tension;
+    std::string perceptual_tension_label;
+    struct {
+        float roughness_component;
+        float harmonicity_component;
+        float tonal_component;
+    } tension_breakdown;
+};
 
 // ── Interval-class vector
 struct IntervalVector {
@@ -127,9 +197,42 @@ struct SequenceInfo {
     int         period;
 };
 
+// ── Modulation & Pivot Search
+struct PivotChord {
+    std::string type;
+    std::vector<int> pcs;
+    std::string label;
+    int root;
+    std::string quality;
+    std::string roman_from, roman_to;
+    std::string function_from, function_to;
+    float pivot_score;
+    std::string interpretation;
+};
+
+struct ModulationStep {
+    int root;
+    std::string quality, label, roman, key_context, function;
+    int vl_from_prev, cumulative_cost;
+    // For pivot steps
+    std::string pivot_note;
+    std::string roman_as_pivot_from, roman_as_pivot_to;
+};
+
+struct PivotSearchResult {
+    int key_from, key_to;
+    std::string key_from_name, key_to_name;
+    int cof_distance;
+    std::string cof_relationship;
+    std::vector<int> common_scale_tones;
+    std::vector<PivotChord> all_pivots;
+    std::vector<ModulationStep> modulation_path;
+};
+
 // ─── Callbacks
 using SetClassCb    = std::function<void(const SetClassInfo&)>;
 using FunctionCb    = std::function<void(const FunctionalAnalysis&, const TonnetzTension&)>;
+using PsychoacousticCb = std::function<void(const PsychoacousticAnalysis&)>;
 using PLRNeighborsCb= std::function<void(const std::vector<PLRTransform>&)>;
 using PLRPathCb     = std::function<void(const std::vector<std::string>&, bool reachable)>;
 using ResolutionsCb = std::function<void(const std::vector<ResolutionPath>&)>;
@@ -148,11 +251,16 @@ public:
     void stop();
     bool isRunning() const { return running_.load(); }
 
-    // ── Structural queries (all async, result via callback)
+    // ── Queries (all async, result via callback)
 
     // Full structural analysis of current chord
-    void queryAnalyzeChord(const std::vector<int>& pcs, int key, int edo,
+    void queryAnalyzeChord(const std::vector<float>& freqs, int key, int edo,
                            FunctionCb cb);
+
+    // Full psychoacoustic neural model analysis
+    void queryPsychoacoustic(const std::vector<float>& freqs, int key,
+                             float level_db, int edo,
+                             PsychoacousticCb cb);
 
     // PLR neighborhood (3 direct neighbors with justification)
     void queryPLRNeighbors(int root, const std::string& quality,
@@ -179,6 +287,10 @@ public:
     // Sequence detection
     void queryDetectSequence(const std::vector<std::pair<int,std::string>>& chords,
                               SequenceCb cb);
+
+    // Pivot search for modulation
+    using PivotSearchCb = std::function<void(const PivotSearchResult&)>;
+    void queryPivotSearch(int key_from, int key_to, PivotSearchCb cb);
 
     // EDO analysis
     void queryEDOAnalysis(int edo, RawJsonCb cb);
@@ -221,6 +333,7 @@ private:
 
     // Parse arrays
     static std::vector<int> jIntArr(const std::string& j, const std::string& k);
+    static std::vector<float> jFloatArr(const std::string& j, const std::string& k);
     static std::vector<std::string> jStrArr(const std::string& j, const std::string& k);
 
     // Parse structured objects from JSON
@@ -228,6 +341,7 @@ private:
     static PLRTransform     parsePLRTransform(const std::string& obj_json);
     static ResolutionPath   parseResolutionPath(const std::string& obj_json);
     static CompletionSuggestion parseCompletion(const std::string& obj_json);
+    static PsychoacousticAnalysis parsePsychoacoustic(const std::string& j);
 
     // Split a JSON array string into object strings
     static std::vector<std::string> splitJsonArray(const std::string& arr);

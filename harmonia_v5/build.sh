@@ -17,19 +17,8 @@ echo "  HARMONIA Build"
 echo "═══════════════════════════════════════════════"
 
 # ── 1. Install system dependencies ─────────────────────────────────────────
-echo ""
-echo "▶ Installing system dependencies..."
-sudo apt-get update -qq
-sudo apt-get install -y \
-    libfltk1.3-dev \
-    libgl1-mesa-dev \
-    libglu1-mesa-dev \
-    libasound2-dev \
-    cmake \
-    build-essential \
-    pkg-config \
-    python3-numpy \
-    python3-scipy
+# On Debian/Ubuntu:
+# apt install libfltk1.3-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev cmake build-essential pkg-config python3-numpy python3-scipy
 
 # ── 2. Install Python theory deps ──────────────────────────────────────────
 echo ""
