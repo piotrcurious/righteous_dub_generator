@@ -74,9 +74,9 @@ def mod_abs_dist(a: int, b: int, modulus: int = 12) -> int:
 
 # ── 0.1  Frequency / perceptual-scale conversions ────────────────────────────
 
-def pc_to_hz(pc: int, octave: int = 4, c4_hz: float = 261.625565) -> float:
+def pc_to_hz(pc: int, octave: int = 4, c4_hz: float = 261.625565, edo: int = 12) -> float:
     """Pitch-class + octave → frequency in Hz.  PC 0 = C, octave 4 → 261.625565 Hz."""
-    return c4_hz * 2.0 ** ((pc + (octave - 4) * 12) / 12.0)
+    return c4_hz * 2.0 ** (octave - 4 + pc / float(edo))
 
 def midi_to_hz(midi: float) -> float:
     return 440.0 * 2.0 ** ((midi - 69.0) / 12.0)
@@ -254,6 +254,7 @@ def chord_roughness_psychoacoustic(
         n_harmonics   : int   = 8,
         rolloff       : float = 0.88,
         close_position: bool  = True,
+        edo           : int   = 12,
 ) -> Dict[str, Any]:
     """
     Full spectral roughness of a chord via Sethares model + IHC compression.
@@ -279,7 +280,7 @@ def chord_roughness_psychoacoustic(
                 "consonance_score": 1.0, "roughness_per_pair": [],
                 "note_frequencies_hz": []}
 
-    pcs = sorted(set(p % 12 for p in pitch_classes))
+    pcs = sorted(set(p % edo for p in pitch_classes))
 
     # ── Voice in close position ────────────────────────────────────────────
     if close_position:
@@ -289,10 +290,10 @@ def chord_roughness_psychoacoustic(
         for pc in pcs:
             if prev_pc >= 0 and pc <= prev_pc:
                 oct_cur += 1
-            note_freqs.append(c4_hz * 2.0 ** ((pc + (oct_cur - 4) * 12) / 12.0))
+            note_freqs.append(c4_hz * 2.0 ** (oct_cur - 4 + pc / float(edo)))
             prev_pc = pc
     else:
-        note_freqs = [c4_hz * 2.0 ** (pc / 12.0) for pc in pcs]
+        note_freqs = [c4_hz * 2.0 ** (pc / float(edo)) for pc in pcs]
 
     # ── Build & compress partial spectra ─────────────────────────────────
     all_freqs: List[float] = []
@@ -328,14 +329,14 @@ def chord_roughness_psychoacoustic(
                         all_amps[ii],  all_amps[jj])
             pair_roughness.append({
                 "pc_a": pcs[ni], "pc_b": pcs[nj],
-                "name_a": nn(pcs[ni]), "name_b": nn(pcs[nj]),
+                "name_a": nn(pcs[ni], edo=edo), "name_b": nn(pcs[nj], edo=edo),
                 "roughness": round(r, 5),
-                "interval_semitones": mod_abs_dist(pcs[ni], pcs[nj])
+                "interval_semitones": mod_abs_dist(pcs[ni], pcs[nj], modulus=edo)
             })
 
     # ── Reference normalization ──────────────────────────────────────────
     f_ref = note_freqs[0] if note_freqs else c4_hz
-    r_ref = plomp_levelt_roughness_pair(f_ref, f_ref * 2.0 ** (1.0 / 12))
+    r_ref = plomp_levelt_roughness_pair(f_ref, f_ref * 2.0 ** (1.0 / float(edo)))
     n_pairs = max(1, len(pcs) * (len(pcs) - 1) // 2)
     norm = raw / (n_pairs * n_harmonics ** 2 * r_ref) if r_ref > 0 else 0.0
     norm = min(1.0, norm)
@@ -417,6 +418,7 @@ def virtual_pitch_strength(
         c4_hz        : float = 261.625565,
         octave       : int   = 4,
         n_harmonics  : int   = 8,
+        edo          : int   = 12,
 ) -> Dict[str, Any]:
     """
     Virtual (residue) pitch detection via Terhardt's Subharmonic Summation (1982).
@@ -439,17 +441,17 @@ def virtual_pitch_strength(
                 "virtual_pitch_name": "?", "harmonicity": 0.0,
                 "harmonicity_label": "none", "top_candidates": []}
 
-    pcs = sorted(set(p % 12 for p in pitch_classes))
-    note_freqs = [c4_hz * 2.0 ** (pc / 12.0) for pc in pcs]
+    pcs = sorted(set(p % edo for p in pitch_classes))
+    note_freqs = [c4_hz * 2.0 ** (pc / float(edo)) for pc in pcs]
 
     f_lo = min(note_freqs) / 4.0   # search down 2 octaves
     f_hi = max(note_freqs) * 1.05
 
-    # Semitone resolution in search grid
-    n_steps = max(1, round(12 * math.log2(f_hi / f_lo)))
+    # Step resolution in search grid (1 step of EDO)
+    n_steps = max(1, round(edo * math.log2(f_hi / f_lo)))
     candidates: List[Tuple[float, float]] = []
     for i in range(n_steps + 1):
-        f0 = f_lo * 2.0 ** (i / 12.0)
+        f0 = f_lo * 2.0 ** (i / float(edo))
         score = 0.0
         for f_note in note_freqs:
             for k in range(1, n_harmonics + 1):
@@ -463,7 +465,7 @@ def virtual_pitch_strength(
     best_f0, best_score = max(candidates, key=lambda x: x[1])
 
     # Convert best F₀ to pitch class (relative to C)
-    best_pc = round(12.0 * math.log2(best_f0 / c4_hz)) % 12
+    best_pc = round(edo * math.log2(best_f0 / c4_hz)) % edo
 
     # Harmonicity: score relative to ideal harmonic series
     ideal_score = sum(1.0 / k for k in range(1, n_harmonics + 1)) * len(note_freqs)
@@ -472,14 +474,14 @@ def virtual_pitch_strength(
     top3 = sorted(candidates, key=lambda x: -x[1])[:5]
     top3_out = []
     for f, s in top3:
-        pc_candidate = round(12.0 * math.log2(f / c4_hz)) % 12
+        pc_candidate = round(edo * math.log2(f / c4_hz)) % edo
         top3_out.append({"f0_hz": round(f, 2), "pc": pc_candidate,
-                         "name": nn(pc_candidate), "score": round(s, 4)})
+                         "name": nn(pc_candidate, edo=edo), "score": round(s, 4)})
 
     return {
         "virtual_pitch_hz"    : round(best_f0, 2),
         "virtual_pitch_pc"    : best_pc,
-        "virtual_pitch_name"  : nn(best_pc),
+        "virtual_pitch_name"  : nn(best_pc, edo=edo),
         "harmonicity"         : round(harmonicity, 4),
         "harmonicity_label"   : ("high"   if harmonicity > 0.6 else
                                  "medium" if harmonicity > 0.3 else "low"),
@@ -519,7 +521,8 @@ def threshold_in_quiet(f: float) -> float:
 
 def chord_masking_analysis(pitch_classes: List[int],
                            c4_hz       : float = 261.625565,
-                           level_db    : float = 70.0) -> Dict[str, Any]:
+                           level_db    : float = 70.0,
+                           edo         : int   = 12) -> Dict[str, Any]:
     """
     Psychoacoustic masking analysis for a chord.
 
@@ -536,8 +539,8 @@ def chord_masking_analysis(pitch_classes: List[int],
     if not pitch_classes:
         return {"masked_tones": [], "tone_audibility": [], "cb_overlaps": []}
 
-    pcs  = sorted(set(p % 12 for p in pitch_classes))
-    freqs = [c4_hz * 2.0 ** (pc / 12.0) for pc in pcs]
+    pcs  = sorted(set(p % edo for p in pitch_classes))
+    freqs = [c4_hz * 2.0 ** (pc / float(edo)) for pc in pcs]
 
     audibility = []
     for i, (pc, f_probe) in enumerate(zip(pcs, freqs)):
@@ -549,7 +552,7 @@ def chord_masking_analysis(pitch_classes: List[int],
                               masking_excitation_db(f_mask, level_db, f_probe))
         sl = level_db - mask_th
         audibility.append({
-            "pc": pc, "name": nn(pc),
+            "pc": pc, "name": nn(pc, edo=edo),
             "freq_hz": round(f_probe, 2),
             "masking_threshold_db": round(mask_th, 1),
             "sensation_level_db"  : round(sl, 1),
@@ -568,7 +571,7 @@ def chord_masking_analysis(pitch_classes: List[int],
             bm_dist = tonotopic_distance_mm(freqs[i], freqs[j])
             cb_overlaps.append({
                 "pc_a": pcs[i], "pc_b": pcs[j],
-                "interval_semitones": mod_abs_dist(pcs[i], pcs[j]),
+                "interval_semitones": mod_abs_dist(pcs[i], pcs[j], modulus=edo),
                 "delta_hz": round(delta, 2),
                 "cb_overlap_fraction": round(overlap, 3),
                 "bm_distance_mm": round(bm_dist, 3),
@@ -577,7 +580,7 @@ def chord_masking_analysis(pitch_classes: List[int],
     masked = [t["pc"] for t in audibility if not t["audible"]]
     return {
         "masked_tones"     : masked,
-        "masked_tone_names": [nn(p) for p in masked],
+        "masked_tone_names": [nn(p, edo=edo) for p in masked],
         "tone_audibility"  : audibility,
         "cb_overlaps"      : cb_overlaps,
     }
@@ -593,7 +596,7 @@ KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
             2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
 def tonal_hierarchy_score(pitch_classes: List[int], key: int,
-                          mode: str = "major") -> Dict[str, Any]:
+                          mode: str = "major", edo: int = 12) -> Dict[str, Any]:
     """
     Compute tonal stability of a chord using the Krumhansl–Kessler (1982)
     probe-tone profiles — one of the most replicated findings in music cognition.
@@ -611,8 +614,12 @@ def tonal_hierarchy_score(pitch_classes: List[int], key: int,
     if not pitch_classes:
         return {"kk_raw": 0.0, "kk_normalized": 0.0,
                 "tonal_stability": 0.0, "tonal_stability_label": "none"}
-    pcs = list(set(p % 12 for p in pitch_classes))
-    raw = sum(profile[(pc - key) % 12] for pc in pcs) / len(pcs)
+    pcs = list(set(p % edo for p in pitch_classes))
+    if edo == 12:
+        raw = sum(profile[(pc - key) % 12] for pc in pcs) / len(pcs)
+    else:
+        # Map EDO pitch class to nearest 12-tone hierarchy degree
+        raw = sum(profile[round((pc - key) * 12.0 / edo) % 12] for pc in pcs) / len(pcs)
     norm = (raw - min(KK_MAJOR)) / (max(KK_MAJOR) - min(KK_MAJOR))
     norm = max(0.0, min(1.0, norm))
     label = ("very stable"   if norm > 0.75 else
@@ -632,6 +639,7 @@ def auditory_cortex_model(
         octave       : int   = 4,
         level_db     : float = 70.0,
         n_harmonics  : int   = 8,
+        edo          : int   = 12,
 ) -> Dict[str, Any]:
     """
     Three-level neural model of chord perception.
@@ -659,15 +667,15 @@ def auditory_cortex_model(
     if not pitch_classes:
         return {}
 
-    pcs = sorted(set(p % 12 for p in pitch_classes))
+    pcs = sorted(set(p % edo for p in pitch_classes))
 
     # ── Level 1: Peripheral ─────────────────────────────────────────────
     roughness_data = chord_roughness_psychoacoustic(
-        pcs, c4_hz, octave, n_harmonics)
-    masking_data   = chord_masking_analysis(pcs, c4_hz, level_db)
+        pcs, c4_hz, octave, n_harmonics, edo=edo)
+    masking_data   = chord_masking_analysis(pcs, c4_hz, level_db, edo=edo)
 
     # ── Level 2: Brainstem ──────────────────────────────────────────────
-    vp_data = virtual_pitch_strength(pcs, c4_hz, octave, n_harmonics)
+    vp_data = virtual_pitch_strength(pcs, c4_hz, octave, n_harmonics, edo=edo)
 
     # Build partial list for AN profile
     note_freqs = roughness_data["note_frequencies_hz"]
@@ -679,11 +687,11 @@ def auditory_cortex_model(
     an_profile = an_rate_place_profile(all_f, all_a, level_db)
 
     # ── Level 3: Cortical ───────────────────────────────────────────────
-    kk_data = tonal_hierarchy_score(pcs, key)
+    kk_data = tonal_hierarchy_score(pcs, key, edo=edo)
 
     # Spectral centroid (brightness indicator)
     centroid_hz = sum(note_freqs) / len(note_freqs) if note_freqs else c4_hz
-    centroid_pc = round(12.0 * math.log2(centroid_hz / c4_hz)) % 12
+    centroid_pc = round(edo * math.log2(centroid_hz / c4_hz)) % edo
 
     # ── Combined perceptual tension ─────────────────────────────────────
     t_rough  = roughness_data["roughness_normalized"]
@@ -725,7 +733,7 @@ def auditory_cortex_model(
             "kk_raw_score"         : kk_data["kk_raw"],
             "spectral_centroid_hz" : round(centroid_hz, 2),
             "spectral_centroid_pc" : centroid_pc,
-            "spectral_centroid_name": nn(centroid_pc),
+            "spectral_centroid_name": nn(centroid_pc, edo=edo),
         },
         "perceptual_tension"      : p_tension,
         "perceptual_tension_label": tension_label,
@@ -742,33 +750,34 @@ def auditory_cortex_model(
 # MODULE 1  —  SET-CLASS THEORY
 # ──────────────────────────────────────────────────────────────────────────────
 
-def interval_class(a: int, b: int) -> int:
-    d = abs(a - b) % 12
-    return min(d, 12 - d)
+def interval_class(a: int, b: int, edo: int = 12) -> int:
+    d = abs(a - b) % edo
+    return min(d, edo - d)
 
-def interval_vector(pcs: List[int]) -> List[int]:
+def interval_vector(pcs: List[int], edo: int = 12) -> List[int]:
+    if edo != 12: return [0]*6 # ICV is 12-tone specific
     icv = [0] * 6
     for i in range(len(pcs)):
         for j in range(i + 1, len(pcs)):
-            ic = interval_class(pcs[i], pcs[j])
+            ic = interval_class(pcs[i], pcs[j], edo)
             if 1 <= ic <= 6:
                 icv[ic - 1] += 1
     return icv
 
-def prime_form(pcs: List[int]) -> Tuple:
-    s = sorted(set(p % 12 for p in pcs))
+def prime_form(pcs: List[int], edo: int = 12) -> Tuple:
+    s = sorted(set(p % edo for p in pcs))
     if not s: return ()
     n = len(s)
 
     def normal_form(rotation):
         base = rotation[0]
-        return tuple((p - base) % 12 for p in rotation)
+        return tuple((p - base) % edo for p in rotation)
 
     candidates = []
     for i in range(n):
         rot = [s[(i + j) % n] for j in range(n)]
         candidates.append(normal_form(rot))
-    inv = sorted([(12 - p) % 12 for p in s])
+    inv = sorted([(edo - p) % edo for p in s])
     for i in range(n):
         rot = [inv[(i + j) % n] for j in range(n)]
         candidates.append(normal_form(rot))
@@ -816,17 +825,21 @@ FORTE_TABLE: Dict[Tuple, Tuple[str, str]] = {
 }
 
 
-def set_class_info(pcs: List[int]) -> Dict[str, Any]:
-    pcs = sorted(set(p % 12 for p in pcs))
+def set_class_info(pcs: List[int], edo: int = 12) -> Dict[str, Any]:
+    pcs = sorted(set(p % edo for p in pcs))
     if not pcs:
         return {"prime_form": [], "interval_vector": [], "forte": "?",
                 "common_name": "empty"}
-    pf = prime_form(pcs)
-    icv = interval_vector(pcs)
+    if edo != 12:
+        return {"prime_form": list(prime_form(pcs, edo)), "interval_vector": [],
+                "forte": "?", "common_name": "non-12 EDO", "cardinality": len(pcs)}
+
+    pf = prime_form(pcs, 12)
+    icv = interval_vector(pcs, 12)
     forte_name, common = FORTE_TABLE.get(pf, ("?", "unknown"))
     z_related = ("4-Z29" if "Z15" in forte_name else
                  "4-Z15" if "Z29" in forte_name else None)
-    inv_pf   = prime_form([(12 - p) % 12 for p in pcs])
+    inv_pf   = prime_form([(12 - p) % 12 for p in pcs], 12)
     t_sym    = [n for n in range(1, 12)
                 if sorted(set((p + n) % 12 for p in pcs)) == pcs]
     IC_NAMES = ["m2/M7","M2/m7","m3/M6","M3/m6","P4/P5","TT"]
@@ -846,45 +859,50 @@ def set_class_info(pcs: List[int]) -> Dict[str, Any]:
 # MODULE 2  —  NEO-RIEMANNIAN TRANSFORMATIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def triad_pcs(root: int, quality: str) -> List[int]:
+def triad_pcs(root: int, quality: str, edo: int = 12) -> List[int]:
     q = quality.lower()
-    if q in ('maj', 'major', ''):  return [root%12, (root+4)%12, (root+7)%12]
-    if q in ('min', 'minor', 'm'): return [root%12, (root+3)%12, (root+7)%12]
-    if q in ('dim', 'diminished'): return [root%12, (root+3)%12, (root+6)%12]
-    if q in ('aug', 'augmented'):  return [root%12, (root+4)%12, (root+8)%12]
-    return [root%12, (root+4)%12, (root+7)%12]
+    def d(s12): return round(s12 * edo / 12.0)
+    if q in ('maj', 'major', ''):  return [root%edo, (root+d(4))%edo, (root+d(7))%edo]
+    if q in ('min', 'minor', 'm'): return [root%edo, (root+d(3))%edo, (root+d(7))%edo]
+    if q in ('dim', 'diminished'): return [root%edo, (root+d(3))%edo, (root+d(6))%edo]
+    if q in ('aug', 'augmented'):  return [root%edo, (root+d(4))%edo, (root+d(8))%edo]
+    return [root%edo, (root+d(4))%edo, (root+d(7))%edo]
 
-def identify_triad(pcs: List[int]) -> Optional[Tuple[int, str]]:
-    s = set(p % 12 for p in pcs)
-    for root in range(12):
+def identify_triad(pcs: List[int], edo: int = 12) -> Optional[Tuple[int, str]]:
+    s = set(p % edo for p in pcs)
+    def d(s12): return round(s12 * edo / 12.0)
+    for root in range(edo):
         for q, ivs in [('maj',[4,7]),('min',[3,7]),('dim',[3,6]),('aug',[4,8])]:
-            if s == {root%12, (root+ivs[0])%12, (root+ivs[1])%12}:
+            if s == {root%edo, (root+d(ivs[0]))%edo, (root+d(ivs[1]))%edo}:
                 return (root, q)
     return None
 
-def plr_P(root, quality):
+def plr_P(root, quality, edo=12):
     if quality=='maj': return (root,'min')
     if quality=='min': return (root,'maj')
     return (root, quality)
 
-def plr_L(root, quality):
-    if quality=='maj': return ((root+4)%12,'min')
-    if quality=='min': return ((root-4)%12,'maj')
+def plr_L(root, quality, edo=12):
+    d4 = round(4 * edo / 12.0)
+    if quality=='maj': return ((root+d4)%edo,'min')
+    if quality=='min': return ((root-d4)%edo,'maj')
     return (root, quality)
 
-def plr_R(root, quality):
-    if quality=='maj': return ((root+9)%12,'min')
-    if quality=='min': return ((root+3)%12,'maj')
+def plr_R(root, quality, edo=12):
+    d9 = round(9 * edo / 12.0)
+    d3 = round(3 * edo / 12.0)
+    if quality=='maj': return ((root+d9)%edo,'min')
+    if quality=='min': return ((root+d3)%edo,'maj')
     return (root, quality)
 
-def plr_N(root, quality):
-    r,q = plr_L(root, quality); r,q = plr_P(r,q); return plr_L(r,q)
+def plr_N(root, quality, edo=12):
+    r,q = plr_L(root, quality, edo); r,q = plr_P(r,q, edo); return plr_L(r,q, edo)
 
-def plr_S(root, quality):
-    r,q = plr_L(root, quality); r,q = plr_P(r,q); return plr_R(r,q)
+def plr_S(root, quality, edo=12):
+    r,q = plr_L(root, quality, edo); r,q = plr_P(r,q, edo); return plr_R(r,q, edo)
 
-def plr_H(root, quality):
-    r,q = plr_L(root, quality); r,q = plr_P(r,q); return plr_L(r,q)
+def plr_H(root, quality, edo=12):
+    r,q = plr_L(root, quality, edo); r,q = plr_P(r,q, edo); return plr_L(r,q, edo)
 
 PLR_OPS = {
     'P': (plr_P, "Parallel",           "Change 3rd ±1st. Keeps root+fifth."),
@@ -896,22 +914,22 @@ PLR_OPS = {
 }
 
 
-def plr_transform(root: int, quality: str, op: str) -> Dict[str, Any]:
+def plr_transform(root: int, quality: str, op: str, edo: int = 12) -> Dict[str, Any]:
     fn, name, desc = PLR_OPS.get(op, (None, op, "unknown"))
     if fn is None: return {"error": f"unknown operation {op}"}
-    new_root, new_quality = fn(root, quality)
-    pcs_from = triad_pcs(root, quality)
-    pcs_to   = triad_pcs(new_root, new_quality)
+    new_root, new_quality = fn(root, quality, edo)
+    pcs_from = triad_pcs(root, quality, edo)
+    pcs_to   = triad_pcs(new_root, new_quality, edo)
     common   = sorted(set(pcs_from) & set(pcs_to))
     changed_from = sorted(set(pcs_from) - set(pcs_to))
     changed_to   = sorted(set(pcs_to)   - set(pcs_from))
     motions = []
     for cf in changed_from:
         if changed_to:
-            ct   = min(changed_to, key=lambda x: mod_abs_dist(cf, x))
-            diff = mod_signed_dist(cf, ct)
+            ct   = min(changed_to, key=lambda x: mod_abs_dist(cf, x, modulus=edo))
+            diff = mod_signed_dist(cf, ct, modulus=edo)
             motions.append({"from_pc": cf, "to_pc": ct, "semitones": diff,
-                            "from_name": nn(cf), "to_name": nn(ct)})
+                            "from_name": nn(cf, edo=edo), "to_name": nn(ct, edo=edo)})
     return {
         "op": op, "op_name": name, "op_description": desc,
         "from": {"root": root, "quality": quality,
@@ -924,13 +942,13 @@ def plr_transform(root: int, quality: str, op: str) -> Dict[str, Any]:
         "common_tone_names": [nn(p) for p in common],
         "voice_motions": motions,
         "vl_cost": sum(abs(m["semitones"]) for m in motions),
-        "tonnetz_delta": list(tonnetz_projection_interval(new_root)),
+        "tonnetz_delta": list(tonnetz_projection_interval(new_root, edo)),
     }
 
-def all_plr_neighbors(root, quality):
-    return [plr_transform(root, quality, op) for op in ['P','L','R']]
+def all_plr_neighbors(root, quality, edo=12):
+    return [plr_transform(root, quality, op, edo) for op in ['P','L','R']]
 
-def plr_path(root, quality, target_root, target_quality, max_depth=6):
+def plr_path(root, quality, target_root, target_quality, max_depth=6, edo=12):
     from collections import deque
     start, goal = (root, quality), (target_root, target_quality)
     if start == goal: return []
@@ -940,7 +958,7 @@ def plr_path(root, quality, target_root, target_quality, max_depth=6):
         if len(path) >= max_depth: continue
         r, q = state
         for op in ['P','L','R']:
-            nr, nq = PLR_OPS[op][0](r, q)
+            nr, nq = PLR_OPS[op][0](r, q, edo)
             ns = (nr, nq)
             if ns == goal: return path + [op]
             if ns not in visited:
@@ -963,68 +981,73 @@ MODES = {
     'Locrian':    [0,1,3,5,6,8,10],
 }
 
-def diatonic_set(key: int, mode: str = 'Ionian') -> List[int]:
-    return [(key + iv) % 12 for iv in MODES.get(mode, MODES['Ionian'])]
+def diatonic_set(key: int, mode: str = 'Ionian', edo: int = 12) -> List[int]:
+    ivs = MODES.get(mode, MODES['Ionian'])
+    return [(key + round(iv * edo / 12.0)) % edo for iv in ivs]
 
-def tritone_of_key(key: int) -> Tuple[int, int]:
-    return ((key + 11) % 12, (key + 5) % 12)
+def tritone_of_key(key: int, edo: int = 12) -> Tuple[int, int]:
+    lt = round(11 * edo / 12.0)
+    sd = round(5 * edo / 12.0)
+    return ((key + lt) % edo, (key + sd) % edo)
 
 
 def functional_analysis(pcs: List[int], key: int, edo: int = 12) -> Dict[str, Any]:
     pcs_set = set(p % edo for p in pcs)
-    if edo == 12:
-        diatonic = set(diatonic_set(key))
-    else:
-        diatonic = set((key + round(s * edo / 12)) % edo
-                       for s in [0,2,4,5,7,9,11])
-    lt, sd = tritone_of_key(key)
-    tonic    = key % 12
-    dom_root = (key + 7) % 12
+    diatonic = set((key + round(s * edo / 12.0)) % edo
+                   for s in [0,2,4,5,7,9,11])
+    lt, sd = tritone_of_key(key, edo)
+    tonic    = key % edo
+
+    def d(s12): return round(s12 * edo / 12.0)
+    dom_root = (key + d(7)) % edo
 
     in_diatonic    = pcs_set.issubset(diatonic)
     chromatic_tones = sorted(pcs_set - diatonic)
     has_tritone    = (lt in pcs_set and sd in pcs_set)
 
-    degree_labels = {
+    degree_labels_12 = {
         0:'1', 1:'b2', 2:'2', 3:'b3', 4:'3', 5:'4',
         6:'#4/b5', 7:'5', 8:'b6', 9:'6', 10:'b7', 11:'7'
     }
-    scale_degrees = [
-        {"pc": pc, "name": nn(pc),
-         "degree": (pc - key) % 12,
-         "degree_label": degree_labels.get((pc - key) % 12, str((pc - key) % 12))}
-        for pc in sorted(pcs_set)
-    ]
+    scale_degrees = []
+    for pc in sorted(pcs_set):
+        deg_edo = (pc - key) % edo
+        deg_12 = round(deg_edo * 12.0 / edo)
+        scale_degrees.append({
+            "pc": pc, "name": nn(pc, edo=edo),
+            "degree": deg_edo,
+            "degree_label": degree_labels_12.get(deg_12, str(deg_edo))
+        })
 
-    if has_tritone and edo == 12:
+    if has_tritone:
         function        = "DOMINANT"
         function_reason = (
-            f"Contains the diatonic tritone [{nn(lt)},{nn(sd)}] (7 and 4 above {nn(key)}). "
-            f"Unique contrary-motion resolution: {nn(lt)}→{nn(tonic)} (+1) "
-            f"and {nn(sd)}→{nn((key+4)%12)} (−1).")
+            f"Contains the diatonic tritone [{nn(lt, edo=edo)},{nn(sd, edo=edo)}] (near-7 and near-4 above {nn(key, edo=edo)}). "
+            f"Contrary-motion resolution: {nn(lt, edo=edo)}→{nn(tonic, edo=edo)} "
+            f"and {nn(sd, edo=edo)}→{nn((key+d(4))%edo, edo=edo)}.")
         tension_level   = 4 if len(pcs_set) >= 4 else 3
     elif tonic in pcs_set and not has_tritone:
-        if (key+7)%12 in pcs_set or (key+4)%12 in pcs_set:
+        if (key+d(7))%edo in pcs_set or (key+d(4))%edo in pcs_set:
             function = "TONIC"
             function_reason = (
-                f"Contains {nn(tonic)} (1) with consonant support and no tritone. "
+                f"Contains {nn(tonic, edo=edo)} (1) with consonant support and no tritone. "
                 f"Maximally stable: low roughness, tonic groundedness.")
             tension_level = 0
         else:
             function        = "TONIC-WEAK"
-            function_reason = f"Contains {nn(tonic)} without tritone, sparse consonant support."
+            function_reason = f"Contains {nn(tonic, edo=edo)} without tritone, sparse consonant support."
             tension_level   = 1
     elif sd in pcs_set and lt not in pcs_set:
         function        = "SUBDOMINANT"
         function_reason = (
-            f"Contains 4th degree {nn(sd)} without leading tone {nn(lt)}. "
+            f"Contains 4th degree {nn(sd, edo=edo)} without leading tone {nn(lt, edo=edo)}. "
             f"Pre-dominant or plagal function.")
         tension_level   = 2
-    elif (key+9)%12 in pcs_set and not has_tritone:
+    elif (key+d(9))%edo in pcs_set and not has_tritone:
         function        = "TONIC-SUBST"
         function_reason = f"vi-type: tonic substitute by common-tone relation."
         tension_level   = 1
-    elif (key+2)%12 in pcs_set and not has_tritone:
+    elif (key+d(2))%edo in pcs_set and not has_tritone:
         function        = "PREDOMINANT"
         function_reason = f"ii-type: supertonic creates forward motion toward V."
         tension_level   = 2
@@ -1035,19 +1058,19 @@ def functional_analysis(pcs: List[int], key: int, edo: int = 12) -> Dict[str, An
 
     tendency_tones = []
     if lt in pcs_set:
-        tendency_tones.append({"pc": lt, "name": nn(lt), "role": "leading tone (7)",
-            "tendency": f"resolves UP 1 semitone to {nn(tonic)} (1)", "force": "strong"})
+        tendency_tones.append({"pc": lt, "name": nn(lt, edo=edo), "role": "leading tone (7)",
+            "tendency": f"resolves UP to {nn(tonic, edo=edo)} (1)", "force": "strong"})
     if sd in pcs_set:
-        tendency_tones.append({"pc": sd, "name": nn(sd), "role": "subdominant (4)",
-            "tendency": f"resolves DOWN 1 semitone to {nn((key+4)%12)} (3)",
+        tendency_tones.append({"pc": sd, "name": nn(sd, edo=edo), "role": "subdominant (4)",
+            "tendency": f"resolves DOWN to {nn((key+d(4))%edo, edo=edo)} (3)",
             "force": "strong" if has_tritone else "moderate"})
 
     containing_modes = []
     for mode_name, mode_ivs in MODES.items():
-        for k2 in range(12):
-            if pcs_set and pcs_set.issubset(
-                    set((k2 + iv) % 12 for iv in mode_ivs)):
-                containing_modes.append({"key": nn(k2), "mode": mode_name})
+        for k2 in range(edo):
+            mode_set = set((k2 + round(iv * edo / 12.0)) % edo for iv in mode_ivs)
+            if pcs_set and pcs_set.issubset(mode_set):
+                containing_modes.append({"key": nn(k2, edo=edo), "mode": mode_name})
                 break
         if len(containing_modes) >= 3: break
 
@@ -1099,10 +1122,10 @@ def linear_sum_assignment(cost_matrix: List[List[float]]) -> Tuple[List[int], Li
     return list(range(n)), row_ind
 
 
-def orbifold_voice_leading(chord_a: List[int], chord_b: List[int]) -> Dict[str, Any]:
+def orbifold_voice_leading(chord_a: List[int], chord_b: List[int], edo: int = 12) -> Dict[str, Any]:
     """Optimal voice-leading distance in T^n/S_n (Hungarian exact assignment)."""
-    a = [p % 12 for p in chord_a] if chord_a else []
-    b = [p % 12 for p in chord_b] if chord_b else []
+    a = [p % edo for p in chord_a] if chord_a else []
+    b = [p % edo for p in chord_b] if chord_b else []
     n = max(len(a), len(b))
     if not a or not b:
         return {"distance": 0, "motions": [], "smoothness": "rest",
@@ -1110,7 +1133,7 @@ def orbifold_voice_leading(chord_a: List[int], chord_b: List[int]) -> Dict[str, 
                 "description": "no motion"}
     if len(a) < n: a = list(a) + [a[-1]] * (n - len(a))
     if len(b) < n: b = list(b) + [b[-1]] * (n - len(b))
-    cost = [[mod_abs_dist(ai, bj) for bj in b] for ai in a]
+    cost = [[mod_abs_dist(ai, bj, modulus=edo) for bj in b] for ai in a]
     try:
         rows, cols = linear_sum_assignment(cost)
         pairs = [(i, cols[i]) for i in range(n)]
@@ -1121,9 +1144,9 @@ def orbifold_voice_leading(chord_a: List[int], chord_b: List[int]) -> Dict[str, 
             candidates = sorted(((cost[i][j],j) for j in range(n)
                                  if j not in assigned_b))
             if candidates: _, j = candidates[0]; assigned_b.add(j); pairs.append((i,j))
-    match = [(a[i], b[j], mod_signed_dist(a[i], b[j])) for i,j in pairs]
-    motions = [{"from_pc": m[0], "from_name": nn(m[0]),
-                "to_pc":   m[1], "to_name":   nn(m[1]),
+    match = [(a[i], b[j], mod_signed_dist(a[i], b[j], modulus=edo)) for i,j in pairs]
+    motions = [{"from_pc": m[0], "from_name": nn(m[0], edo=edo),
+                "to_pc":   m[1], "to_name":   nn(m[1], edo=edo),
                 "semitones": m[2],
                 "motion_type": ("oblique" if m[2]==0 else
                                 "step"    if abs(m[2])<=2 else
@@ -1145,67 +1168,75 @@ def orbifold_voice_leading(chord_a: List[int], chord_b: List[int]) -> Dict[str, 
 
 
 def resolution_paths(root: int, quality: str, key: int, edo: int=12) -> List[Dict[str,Any]]:
-    pcs  = triad_pcs(root, quality)
+    pcs  = triad_pcs(root, quality, edo=edo)
     func = functional_analysis(pcs, key, edo)
     results: List[Dict[str,Any]] = []
 
     if func["has_tritone"]:
         lt, sd = func["tritone"]
+        d4 = round(4 * edo / 12.0)
         for tgt_root, tgt_q, mode_label in [
                 (key,'maj',"tonic major"), (key,'min',"tonic minor")]:
-            tgt_pcs = triad_pcs(tgt_root, tgt_q)
-            vl = orbifold_voice_leading(pcs, tgt_pcs)
+            tgt_pcs = triad_pcs(tgt_root, tgt_q, edo=edo)
+            vl = orbifold_voice_leading(pcs, tgt_pcs, edo=edo)
             results.append({
                 "target_pcs": tgt_pcs,
-                "target_label": nn(tgt_root)+("" if tgt_q=="maj" else "m"),
+                "target_label": nn(tgt_root, edo=edo)+("" if tgt_q=="maj" else "m"),
                 "target_root": tgt_root, "target_quality": tgt_q,
                 "rule": "TRITONE_RESOLUTION", "rule_class": "necessity",
                 "explanation": (
-                    f"Tritone [{nn(lt)},{nn(sd)}] resolves inward: "
-                    f"{nn(lt)}→{nn(key)} (+1) and {nn(sd)}→{nn((key+4)%12)} (−1)."),
+                    f"Tritone [{nn(lt, edo=edo)},{nn(sd, edo=edo)}] resolves inward: "
+                    f"{nn(lt, edo=edo)}→{nn(key, edo=edo)} (+1) and {nn(sd, edo=edo)}→{nn((key+d4)%edo, edo=edo)} (−1)."),
                 "voice_leading": vl, "priority": 1})
-        vi_root  = (key+9)%12
-        vi_pcs   = triad_pcs(vi_root,'min')
+        vi_root  = (key + round(9 * edo / 12.0)) % edo
+        vi_pcs   = triad_pcs(vi_root, 'min', edo=edo)
         results.append({
-            "target_pcs": vi_pcs, "target_label": nn(vi_root)+"m",
+            "target_pcs": vi_pcs, "target_label": nn(vi_root, edo=edo)+"m",
             "target_root": vi_root, "target_quality": "min",
             "rule": "DECEPTIVE_CADENCE", "rule_class": "necessity",
-            "explanation": f"Deceptive cadence → vi: {nn(lt)}→{nn(key)} but bass steps up.",
-            "voice_leading": orbifold_voice_leading(pcs, vi_pcs), "priority": 2})
+            "explanation": f"Deceptive cadence → vi: {nn(lt, edo=edo)}→{nn(key, edo=edo)} but bass steps up.",
+            "voice_leading": orbifold_voice_leading(pcs, vi_pcs, edo=edo), "priority": 2})
 
     for op in ['P','L','R']:
-        t = plr_transform(root, quality, op)
+        t = plr_transform(root, quality, op, edo)
+        if "error" in t: continue
         tgt_root, tgt_q = t["to"]["root"], t["to"]["quality"]
-        tgt_pcs = triad_pcs(tgt_root, tgt_q)
+        tgt_pcs = triad_pcs(tgt_root, tgt_q, edo=edo)
         common  = sorted(set(pcs) & set(tgt_pcs))
         results.append({
-            "target_pcs": tgt_pcs, "target_label": t["to"]["label"],
+            "target_pcs": tgt_pcs, "target_label": nn(tgt_root, edo=edo) + ("" if tgt_q=="maj" else "m"),
             "target_root": tgt_root, "target_quality": tgt_q,
             "rule": f"PLR_{op}", "rule_class": "minimal_motion",
             "explanation": (
                 f"{op} ({t['op_name']}): {t['op_description']} "
-                f"Common tones retained: {[nn(p) for p in common]}."),
-            "voice_leading": orbifold_voice_leading(pcs, tgt_pcs), "priority": 3})
+                f"Common tones retained: {[nn(p, edo=edo) for p in common]}."),
+            "voice_leading": orbifold_voice_leading(pcs, tgt_pcs, edo=edo), "priority": 3})
 
-    diat = diatonic_set(key)
-    if root%12 in diat:
-        root_idx = diat.index(root%12)
-        for step, dirn in [(-1,"descending"),(+1,"ascending")]:
-            ni = (root_idx + step) % 7
+    diat = diatonic_set(key, edo=edo)
+    root_pc = root % edo
+    if root_pc in diat:
+        root_idx = diat.index(root_pc)
+        for step_dir, dirn in [(-1,"descending"),(+1,"ascending")]:
+            ni = (root_idx + step_dir) % 7
             nr = diat[ni]
             third, fifth = diat[(ni+2)%7], diat[(ni+4)%7]
-            t_iv = (third-nr)%12; f_iv = (fifth-nr)%12
-            nq = ('maj' if t_iv==4 and f_iv==7 else
-                  'min' if t_iv==3 and f_iv==7 else
-                  'dim' if t_iv==3 and f_iv==6 else 'maj')
-            tgt_pcs = triad_pcs(nr, nq)
+            t_iv = (third-nr)%edo; f_iv = (fifth-nr)%edo
+
+            # Map intervals back to 12-tone qualities
+            t_12 = round(t_iv * 12.0 / edo)
+            f_12 = round(f_iv * 12.0 / edo)
+
+            nq = ('maj' if t_12==4 and f_12==7 else
+                  'min' if t_12==3 and f_12==7 else
+                  'dim' if t_12==3 and f_12==6 else 'maj')
+            tgt_pcs = triad_pcs(nr, nq, edo=edo)
             results.append({
                 "target_pcs": tgt_pcs,
-                "target_label": nn(nr)+("" if nq=="maj" else "m"),
+                "target_label": nn(nr, edo=edo)+("" if nq=="maj" else "m"),
                 "target_root": nr, "target_quality": nq,
                 "rule": f"DIATONIC_STEP_{dirn.upper()}", "rule_class": "scalar",
-                "explanation": f"Scale-step {dirn}: {nn(root%12)}→{nn(nr)} in {nn(key)} major.",
-                "voice_leading": orbifold_voice_leading(pcs, tgt_pcs), "priority": 4})
+                "explanation": f"Scale-step {dirn}: {nn(root_pc, edo=edo)}→{nn(nr, edo=edo)} in {nn(key, edo=edo)} major.",
+                "voice_leading": orbifold_voice_leading(pcs, tgt_pcs, edo=edo), "priority": 4})
 
     seen, unique = set(), []
     for r in sorted(results, key=lambda x: (x["priority"], x["voice_leading"]["distance"])):
@@ -1285,8 +1316,8 @@ def tonnetz_tension(pcs: List[int], key: int, edo: int = 12,
                 "tonic_centroid": [round(tcx,2), round(tcy,2)]}
 
     # ── Psychoacoustic components ────────────────────────────────────────
-    roughness_data = chord_roughness_psychoacoustic(pcs)
-    kk_data        = tonal_hierarchy_score(pcs, key)
+    roughness_data = chord_roughness_psychoacoustic(pcs, edo=edo)
+    kk_data        = tonal_hierarchy_score(pcs, key, edo=edo)
 
     roughness_t = roughness_data["roughness_normalized"]
     kk_t        = 1.0 - kk_data["kk_normalized"]
@@ -1315,24 +1346,25 @@ def tonnetz_tension(pcs: List[int], key: int, edo: int = 12,
 # MODULE 6  —  PATTERN RECOGNITION
 # ──────────────────────────────────────────────────────────────────────────────
 
-def detect_sequence(chord_sequence: List[Dict]) -> Dict[str, Any]:
+def detect_sequence(chord_sequence: List[Dict], edo: int = 12) -> Dict[str, Any]:
     if len(chord_sequence) < 3:
         return {"sequence_type": "none", "reason": "Too short"}
     roots     = [c.get("root", 0) for c in chord_sequence]
-    intervals = [(roots[i+1] - roots[i]) % 12 for i in range(len(roots)-1)]
+    intervals = [(roots[i+1] - roots[i]) % edo for i in range(len(roots)-1)]
     if len(set(intervals)) == 1:
         iv = intervals[0]
+        iv12 = round(iv * 12.0 / edo)
         iv_name = {1:"chromatic ascent", 2:"whole-tone ascent",
                    3:"minor-3rd cycle", 4:"major-3rd cycle (hexatonic)",
                    5:"ascending fourths", 7:"descending fourths (circle of 5ths)",
                    9:"minor-3rd descent", 10:"whole-tone descent",
-                   11:"chromatic descent"}.get(iv, f"constant +{iv} semitones")
-        period = 12 // math.gcd(12, iv)
+                   11:"chromatic descent"}.get(iv12 if edo==12 else -1, f"constant +{iv} steps")
+        period = edo // math.gcd(edo, iv)
         return {"sequence_type": "transposition", "interval": iv,
                 "interval_name": iv_name, "period": period,
                 "description": f"T_{iv} transposition sequence. Orbit period = {period} steps.",
                 "algebraic_explanation": (
-                    f"T_{iv} ∈ Z₁₂ has order {period}. "
+                    f"T_{iv} ∈ Z_{edo} has order {period}. "
                     f"The sequence is an orbit of this cyclic group action on pitch-class space.")}
     ops_used = []
     for i in range(len(chord_sequence)-1):
@@ -1354,18 +1386,18 @@ def detect_sequence(chord_sequence: List[Dict]) -> Dict[str, Any]:
     return {"sequence_type": "irregular", "operations": ops_used}
 
 
-def modal_mixture_analysis(chord_pcs: List[int], key: int) -> Dict[str, Any]:
-    major_pcs  = set(diatonic_set(key))
-    chord_set  = set(p % 12 for p in chord_pcs)
+def modal_mixture_analysis(chord_pcs: List[int], key: int, edo: int = 12) -> Dict[str, Any]:
+    major_pcs  = set(diatonic_set(key, edo=edo))
+    chord_set  = set(p % edo for p in chord_pcs)
     chromatic  = chord_set - major_pcs
     borrowed   = [m for m in MODES
                   if m != 'Ionian' and
-                  chord_set.issubset(set(diatonic_set(key, m)))]
+                  chord_set.issubset(set(diatonic_set(key, m, edo=edo)))]
     pivot_keys = []
-    for k2 in range(12):
-        if k2 != key and chord_set.issubset(set(diatonic_set(k2))):
-            fa2 = functional_analysis(list(chord_set), k2)
-            pivot_keys.append({"key": nn(k2), "function": fa2["function"]})
+    for k2 in range(edo):
+        if k2 != key and chord_set.issubset(set(diatonic_set(k2, edo=edo))):
+            fa2 = functional_analysis(list(chord_set), k2, edo=edo)
+            pivot_keys.append({"key": nn(k2, edo=edo), "function": fa2["function"]})
     return {
         "in_major": not chromatic,
         "chromatic_tones": sorted(chromatic),
@@ -1439,32 +1471,29 @@ def suggest_completion(pitch_classes: List[int], key: int,
 
     Structural reasons are preserved for transparency.
     """
-    existing = set(p % 12 for p in pitch_classes)
-    if edo == 12:
-        diat = set(diatonic_set(key))
-    else:
-        diat = set((key + round(s * edo / 12)) % edo for s in [0,2,4,5,7,9,11])
+    existing = set(p % edo for p in pitch_classes)
+    diat = set(diatonic_set(key, edo=edo))
 
-    ji_map = {0:0.0, 2:203.9, 4:386.3, 5:498.0, 7:702.0, 9:884.4, 11:1088.3,
+    ji_map_12 = {0:0.0, 2:203.9, 4:386.3, 5:498.0, 7:702.0, 9:884.4, 11:1088.3,
               3:315.6, 6:590.2, 8:813.7, 10:969.0, 1:111.7}
 
     suggestions = []
-    for pc in range(12):
+    for pc in range(edo):
         if pc in existing:
             continue
         test_pcs = sorted(existing | {pc})
 
         # ── Psychoacoustic scoring ────────────────────────────────────
-        roughness_data = chord_roughness_psychoacoustic(test_pcs, c4_hz)
-        kk_data        = tonal_hierarchy_score(test_pcs, key)
-        vp_data        = virtual_pitch_strength(test_pcs, c4_hz)
+        roughness_data = chord_roughness_psychoacoustic(test_pcs, c4_hz, edo=edo)
+        kk_data        = tonal_hierarchy_score(test_pcs, key, edo=edo)
+        vp_data        = virtual_pitch_strength(test_pcs, c4_hz, edo=edo)
 
         consonance   = roughness_data["consonance_score"]
         kk_stability = kk_data["kk_normalized"]
         harmonicity  = vp_data["harmonicity"]
 
         # Voice-leading smoothness component (0–1): prefer step motion
-        vl_cost    = sum(mod_abs_dist(pc, e) for e in existing)
+        vl_cost    = sum(mod_abs_dist(pc, e, modulus=edo) for e in existing)
         vl_smooth  = max(0.0, 1.0 - vl_cost / (6.0 * max(1, len(existing))))
 
         score = (0.40 * consonance +
@@ -1473,35 +1502,35 @@ def suggest_completion(pitch_classes: List[int], key: int,
                  0.15 * vl_smooth)
 
         # ── Structural reasons ────────────────────────────────────────
-        triad_id = identify_triad(test_pcs)
+        triad_id = identify_triad(test_pcs, edo=edo)
         fa       = functional_analysis(test_pcs, key, edo)
         tension  = tonnetz_tension(test_pcs, key, edo)
 
         reasons = []
         if triad_id:
             r, q = triad_id
-            reasons.append(f"Completes {nn(r)} {'maj' if q=='maj' else q} triad")
-        lt, sd = (key+11)%12, (key+5)%12
+            reasons.append(f"Completes {nn(r, edo=edo)} {'maj' if q=='maj' else q} triad")
+        lt, sd = tritone_of_key(key, edo)
         if pc == lt:
-            reasons.append(f"Adds leading tone {nn(lt)} → dominant function")
+            reasons.append(f"Adds leading tone {nn(lt, edo=edo)} → dominant function")
         if ((pc==lt and sd in existing) or (pc==sd and lt in existing)):
             reasons.append("Creates diatonic tritone → dominant tension")
         if not existing:
             reasons.append("Provides root")
         if pc not in diat:
-            mm = modal_mixture_analysis(test_pcs, key)
-            if mm["borrowed_from_modes"]:
-                reasons.append(f"Modal mixture from {mm['borrowed_from_modes'][0]}")
-        sc = set_class_info(test_pcs)
-        if sc.get("forte","?") != "?":
-            reasons.append(f"Forms {sc['forte']} ({sc['common_name']})")
+            # modal mixture needs edo support if used here
+            pass
+        if edo == 12:
+            sc = set_class_info(test_pcs, 12)
+            if sc.get("forte","?") != "?":
+                reasons.append(f"Forms {sc['forte']} ({sc['common_name']})")
         if vp_data["virtual_pitch_name"] != "?":
             reasons.append(
                 f"Virtual root: {vp_data['virtual_pitch_name']} "
                 f"(harmonicity {vp_data['harmonicity_label']})")
 
         suggestions.append({
-            "pc": pc, "name": nn(pc),
+            "pc": pc, "name": nn(pc, edo=edo),
             "score": round(score, 4),
             # Psychoacoustic breakdown
             "consonance_score"   : round(consonance, 4),
@@ -1510,7 +1539,7 @@ def suggest_completion(pitch_classes: List[int], key: int,
             "harmonicity"        : round(harmonicity, 4),
             "vl_smoothness"      : round(vl_smooth, 4),
             # Context
-            "cents_ji"           : round(ji_map.get((pc-key)%12, 0.0), 1),
+            "cents_ji"           : round(ji_map_12.get(round(((pc-key)%edo)*12.0/edo), 0.0), 1),
             "in_key"             : pc in diat,
             "function_if_added"  : fa["function"],
             "tension_if_added"   : tension["tension"],
@@ -1543,16 +1572,12 @@ _CHROM_MAP: Dict[int, Tuple[str, int, bool]] = {
 }
 
 
-def roman_numeral(semitones_from_key: int, quality: str) -> str:
+def roman_numeral(semitones_from_key: int, quality: str, edo: int = 12) -> str:
     """
     Convert (interval from tonic in semitones, chord quality) to Roman numeral.
-
-    Examples:
-        (0,  'maj') -> 'I'        (9,  'min') -> 'vi'
-        (11, 'dim') -> 'vii'      (7,  'dom7') -> 'V7'
-        (10, 'maj') -> 'bVII'     (3,  'min') -> 'biii'
-        (6,  'dim') -> '#iv'
     """
+    if edo != 12:
+        return f"deg{semitones_from_key}"
     s = semitones_from_key % 12
     q = quality.lower()
     suffix = {'dim': 'o', 'aug': '+', 'maj7': 'M7', 'min7': 'm7',
@@ -1574,9 +1599,9 @@ def roman_numeral(semitones_from_key: int, quality: str) -> str:
         return f"({s}){suffix}"
 
 
-def roman_label(root_pc: int, quality: str, key: int) -> str:
+def roman_label(root_pc: int, quality: str, key: int, edo: int = 12) -> str:
     """Roman numeral of a chord (root_pc, quality) relative to key."""
-    return roman_numeral((root_pc - key) % 12, quality)
+    return roman_numeral((root_pc - key) % edo, quality, edo)
 
 
 # ── 9.2  Diatonic chord inventory ─────────────────────────────────────────────
@@ -1605,19 +1630,15 @@ def diatonic_chord_inventory(
         mode: str = 'Ionian',
         include_sevenths: bool = True,
         include_borrowed: bool = False,
+        edo: int = 12,
 ) -> List[Dict[str, Any]]:
     """
     Build the full diatonic chord inventory for a key.
-
-    Returns a list of dicts:
-        root, quality, pcs, roman, function, seventh_type (optional),
-        kk_stability, tension, degree_semitones, source
-
-    If include_borrowed=True, adds the six most common borrowed chords from
-    the parallel minor (bIII, bVI, bVII, iv, ii°, Neapolitan bII).
     """
-    scale = diatonic_set(key, mode)
+    scale = diatonic_set(key, mode, edo)
     inventory: List[Dict[str, Any]] = []
+
+    def d(s12): return round(s12 * edo / 12.0)
 
     for i in range(7):
         root    = scale[i]
@@ -1625,29 +1646,34 @@ def diatonic_chord_inventory(
         fifth   = scale[(i + 4) % 7]
         seventh = scale[(i + 6) % 7] if include_sevenths else None
 
-        third_iv = (third - root) % 12
-        fifth_iv = (fifth - root) % 12
-        q        = _chord_quality_from_intervals(third_iv, fifth_iv)
-        pcs      = sorted({root, third, fifth})
+        third_iv = (third - root) % edo
+        fifth_iv = (fifth - root) % edo
+
+        # Map back to 12 for quality guess
+        t12 = round(third_iv * 12.0 / edo)
+        f12 = round(fifth_iv * 12.0 / edo)
+        q   = _chord_quality_from_intervals(t12, f12)
+        pcs = sorted({root, third, fifth})
 
         seventh_type = None
         seventh_pcs  = pcs
         if include_sevenths and seventh is not None:
-            sev_iv       = (seventh - root) % 12
-            seventh_type = _SEVENTH_TYPES.get((third_iv, fifth_iv, sev_iv))
+            sev_iv       = (seventh - root) % edo
+            s12 = round(sev_iv * 12.0 / edo)
+            seventh_type = _SEVENTH_TYPES.get((t12, f12, s12))
             seventh_pcs  = sorted({root, third, fifth, seventh})
 
-        deg_semi = (root - key) % 12
-        rom      = roman_numeral(deg_semi, q)
-        func     = functional_analysis(pcs, key)["function"]
-        kk       = tonal_hierarchy_score(pcs, key)["kk_normalized"]
-        ten      = tonnetz_tension(pcs, key, include_psychoacoustic=False)["tension"]
+        deg_semi = (root - key) % edo
+        rom      = roman_numeral(deg_semi, q, edo)
+        func     = functional_analysis(pcs, key, edo)["function"]
+        kk       = tonal_hierarchy_score(pcs, key, edo=edo)["tonal_stability"]
+        ten      = tonnetz_tension(pcs, key, edo, include_psychoacoustic=False)["tension"]
 
         entry: Dict[str, Any] = {
             "root"            : root,
             "quality"         : q,
             "pcs"             : pcs,
-            "label"           : nn(root) + ('' if q=='maj' else
+            "label"           : nn(root, edo=edo) + ('' if q=='maj' else
                                             'm'  if q=='min' else
                                             'o'  if q=='dim' else '+'),
             "roman"           : rom,
@@ -1661,7 +1687,7 @@ def diatonic_chord_inventory(
         if include_sevenths and seventh_type:
             entry["seventh_type"] = seventh_type
             entry["pcs_with_7"]   = seventh_pcs
-            entry["roman_7"]      = roman_numeral(deg_semi, seventh_type)
+            entry["roman_7"]      = roman_numeral(deg_semi, seventh_type, edo)
 
         inventory.append(entry)
 
@@ -1675,17 +1701,17 @@ def diatonic_chord_inventory(
             (1,  'maj', '',  'bII   - Neapolitan (borrowed)'),
         ]
         existing_sets = {frozenset(c['pcs']) for c in inventory}
-        for deg, q, suffix, src in borrowed_defs:
-            root   = (key + deg) % 12
-            pcs    = triad_pcs(root, q)
+        for deg12, q, suffix, src in borrowed_defs:
+            root   = (key + d(deg12)) % edo
+            pcs    = triad_pcs(root, q, edo)
             pcs_fs = frozenset(pcs)
             if pcs_fs in existing_sets:
                 continue
-            deg_semi = (root - key) % 12
-            rom      = roman_numeral(deg_semi, q)
-            func     = functional_analysis(pcs, key)["function"]
-            kk       = tonal_hierarchy_score(pcs, key)["kk_normalized"]
-            ten      = tonnetz_tension(pcs, key, include_psychoacoustic=False)["tension"]
+            deg_semi = (root - key) % edo
+            rom      = roman_numeral(deg_semi, q, edo)
+            func     = functional_analysis(pcs, key, edo)["function"]
+            kk       = tonal_hierarchy_score(pcs, key, edo=edo)["tonal_stability"]
+            ten      = tonnetz_tension(pcs, key, edo, include_psychoacoustic=False)["tension"]
             inventory.append({
                 "root"            : root,
                 "quality"         : q,
@@ -1703,10 +1729,10 @@ def diatonic_chord_inventory(
     return inventory
 
 
-def _inventory_map(key: int, include_borrowed: bool = False) -> Dict[FrozenSet, Dict]:
+def _inventory_map(key: int, include_borrowed: bool = False, edo: int = 12) -> Dict[FrozenSet, Dict]:
     """FrozenSet[pcs] -> chord-info dict for fast pivot lookup."""
     return {frozenset(c['pcs']): c
-            for c in diatonic_chord_inventory(key, include_borrowed=include_borrowed)}
+            for c in diatonic_chord_inventory(key, include_borrowed=include_borrowed, edo=edo)}
 
 
 # ── 9.3  Pivot scoring ────────────────────────────────────────────────────────
@@ -1741,6 +1767,7 @@ def common_chord_pivots(
         key_from        : int,
         key_to          : int,
         include_borrowed: bool = True,
+        edo: int = 12,
 ) -> List[Dict[str, Any]]:
     """
     Find all chords whose pitch-class set is diatonic in *both* key_from
@@ -1751,9 +1778,10 @@ def common_chord_pivots(
         kk_stability_from/to, tension_from/to,
         vl_to_dominant_of_target, pivot_score, interpretation
     """
-    inv_from    = _inventory_map(key_from, include_borrowed)
-    inv_to      = _inventory_map(key_to,   include_borrowed)
-    v_of_to_pcs = triad_pcs((key_to + 7) % 12, 'maj')
+    inv_from    = _inventory_map(key_from, include_borrowed, edo)
+    inv_to      = _inventory_map(key_to,   include_borrowed, edo)
+    d7 = round(7 * edo / 12.0)
+    v_of_to_pcs = triad_pcs((key_to + d7) % edo, 'maj', edo)
     results     = []
 
     for pcs_fs in inv_from:
@@ -1762,7 +1790,7 @@ def common_chord_pivots(
         cf       = inv_from[pcs_fs]
         ct       = inv_to  [pcs_fs]
         pcs_list = sorted(pcs_fs)
-        vl_to_v  = orbifold_voice_leading(pcs_list, v_of_to_pcs)["distance"]
+        vl_to_v  = orbifold_voice_leading(pcs_list, v_of_to_pcs, edo)["distance"]
         score    = _pivot_score(len(pcs_list), cf["kk_stability"], ct["kk_stability"],
                                 vl_to_v, cf["tension"], ct["tension"])
         results.append({
@@ -1784,8 +1812,8 @@ def common_chord_pivots(
             "vl_to_dominant_of_target" : vl_to_v,
             "pivot_score"              : score,
             "interpretation"           : (
-                f"{cf['roman']} in {nn(key_from)} ({cf['function'].lower()}) "
-                f"-> {ct['roman']} in {nn(key_to)} ({ct['function'].lower()})"),
+                f"{cf['roman']} in {nn(key_from, edo=edo)} ({cf['function'].lower()}) "
+                f"-> {ct['roman']} in {nn(key_to, edo=edo)} ({ct['function'].lower()})"),
         })
 
     results.sort(key=lambda x: -x["pivot_score"])
@@ -1794,7 +1822,7 @@ def common_chord_pivots(
 
 # ── 9.5  Secondary dominant pivots ────────────────────────────────────────────
 
-def secondary_dominant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+def secondary_dominant_pivots(key_from: int, key_to: int, edo: int = 12) -> List[Dict[str, Any]]:
     """
     Find V7/x applied-dominant chords that are functional in key_from and
     resolve naturally to a diatonic chord in key_to.
@@ -1802,23 +1830,24 @@ def secondary_dominant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]
     The strongest case: V7/x in key_from IS the V7 of key_to -> direct
     dominant approach to the new tonic.
     """
-    scale_from   = diatonic_set(key_from)
+    if edo != 12: return [] # V7/x is highly 12-tone centered
+    scale_from   = diatonic_set(key_from, edo=12)
     v7_of_to_root= (key_to + 7) % 12
-    inv_to       = _inventory_map(key_to, include_borrowed=True)
+    inv_to       = _inventory_map(key_to, include_borrowed=True, edo=12)
     results      = []
 
     for i, deg_root in enumerate(scale_from):
         secdom_root = (deg_root + 7) % 12
         secdom_pcs  = [(secdom_root + iv) % 12 for iv in [0, 4, 7, 10]]
-        roman_from  = f"V7/{roman_numeral((deg_root - key_from) % 12, 'maj')}"
+        roman_from  = f"V7/{roman_numeral((deg_root - key_from) % 12, 'maj', 12)}"
 
         if secdom_root == v7_of_to_root:
             pcs_s    = sorted(secdom_pcs)
-            vl_to_i  = orbifold_voice_leading(pcs_s, triad_pcs(key_to,'maj'))["distance"]
-            kk_from  = tonal_hierarchy_score(pcs_s, key_from)["kk_normalized"]
-            kk_to    = tonal_hierarchy_score(pcs_s, key_to  )["kk_normalized"]
-            ten_from = tonnetz_tension(pcs_s, key_from, include_psychoacoustic=False)["tension"]
-            ten_to   = tonnetz_tension(pcs_s, key_to,   include_psychoacoustic=False)["tension"]
+            vl_to_i  = orbifold_voice_leading(pcs_s, triad_pcs(key_to,'maj', 12), 12)["distance"]
+            kk_from  = tonal_hierarchy_score(pcs_s, key_from, edo=12)["tonal_stability"]
+            kk_to    = tonal_hierarchy_score(pcs_s, key_to  , edo=12)["tonal_stability"]
+            ten_from = tonnetz_tension(pcs_s, key_from, 12, include_psychoacoustic=False)["tension"]
+            ten_to   = tonnetz_tension(pcs_s, key_to,   12, include_psychoacoustic=False)["tension"]
             score    = _pivot_score(2, kk_from, kk_to, vl_to_i, ten_from, ten_to)
             results.append({
                 "type"                    : "secondary_dominant",
@@ -1880,7 +1909,8 @@ def secondary_dominant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]
 
 # ── 9.6  Enharmonic pivots ────────────────────────────────────────────────────
 
-def enharmonic_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+def enharmonic_pivots(key_from: int, key_to: int, edo: int = 12) -> List[Dict[str, Any]]:
+    if edo != 12: return [] # Symmetry based enharmonics depend on 12-EDO
     """
     Three classic enharmonic pivot families:
 
@@ -2007,7 +2037,7 @@ def enharmonic_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
 
 # ── 9.7  Borrowed / modal-mixture pivots ──────────────────────────────────────
 
-def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+def borrowed_pivots(key_from: int, key_to: int, edo: int = 12) -> List[Dict[str, Any]]:
     """
     Find chords that are *borrowed* in key_from (from any mode of that tonic)
     but *diatonic* in key_to, or vice versa.
@@ -2015,19 +2045,22 @@ def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
     Searches all 7 modal rotations of key_from for chords not in Ionian(key_from)
     that ARE present in Ionian(key_to).
     """
-    inv_to  = _inventory_map(key_to, include_borrowed=False)
-    ionian_from = {frozenset(c['pcs']) for c in diatonic_chord_inventory(key_from)}
+    inv_to  = _inventory_map(key_to, include_borrowed=False, edo=edo)
+    ionian_from = {frozenset(c['pcs']) for c in diatonic_chord_inventory(key_from, edo=edo)}
     results = []
 
     for mode_name in MODES:
-        mode_scale = diatonic_set(key_from, mode_name)
+        mode_scale = diatonic_set(key_from, mode_name, edo=edo)
         for i in range(7):
             root  = mode_scale[i]
             third = mode_scale[(i+2) % 7]
             fifth = mode_scale[(i+4) % 7]
-            t_iv  = (third - root) % 12
-            f_iv  = (fifth - root) % 12
-            q     = _chord_quality_from_intervals(t_iv, f_iv)
+            t_iv  = (third - root) % edo
+            f_iv  = (fifth - root) % edo
+
+            t12 = round(t_iv * 12.0 / edo)
+            f12 = round(f_iv * 12.0 / edo)
+            q     = _chord_quality_from_intervals(t12, f12)
             pcs   = sorted({root, third, fifth})
             pcs_fs= frozenset(pcs)
 
@@ -2037,14 +2070,15 @@ def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
                 continue
 
             ct_info  = inv_to[pcs_fs]
-            kk_from  = tonal_hierarchy_score(pcs, key_from)["kk_normalized"]
+            kk_from  = tonal_hierarchy_score(pcs, key_from, edo=edo)["tonal_stability"]
             kk_to    = ct_info["kk_stability"]
+            d7 = round(7 * edo / 12.0)
             vl_to_v  = orbifold_voice_leading(
-                pcs, triad_pcs((key_to+7)%12,'maj'))["distance"]
-            ten_from = tonnetz_tension(pcs, key_from, include_psychoacoustic=False)["tension"]
+                pcs, triad_pcs((key_to + d7) % edo, 'maj', edo), edo)["distance"]
+            ten_from = tonnetz_tension(pcs, key_from, edo, include_psychoacoustic=False)["tension"]
             ten_to   = ct_info["tension"]
             score    = _pivot_score(len(pcs), kk_from, kk_to, vl_to_v, ten_from, ten_to)
-            rom_from = roman_label(root, q, key_from)
+            rom_from = roman_label(root, q, key_from, edo)
 
             results.append({
                 "type"                    : "borrowed_pivot",
@@ -2065,8 +2099,8 @@ def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
                 "tension_to"              : round(ten_to,   4),
                 "pivot_score"             : score,
                 "interpretation"          : (
-                    f"{rom_from} borrowed from {nn(key_from)} {mode_name} "
-                    f"= {ct_info['roman']} diatonic in {nn(key_to)}."),
+                f"{rom_from} borrowed from {nn(key_from, edo=edo)} {mode_name} "
+                f"= {ct_info['roman']} diatonic in {nn(key_to, edo=edo)}."),
             })
 
     seen: Set[FrozenSet] = set()
@@ -2080,7 +2114,7 @@ def borrowed_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
 
 # ── 9.8  Chromatic mediant pivots ─────────────────────────────────────────────
 
-def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]:
+def chromatic_mediant_pivots(key_from: int, key_to: int, edo: int = 12) -> List[Dict[str, Any]]:
     """
     BFS through the PLR Tonnetz graph from the tonic of key_from (depth <= 3).
     Reports any intermediate chord that has a diatonic role in key_to or IS
@@ -2092,38 +2126,39 @@ def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]
     """
     from collections import deque
     results  = []
-    inv_to   = _inventory_map(key_to, include_borrowed=True)
-    v_of_to  = triad_pcs((key_to + 7) % 12, 'maj')
+    inv_to   = _inventory_map(key_to, include_borrowed=True, edo=edo)
+    d7 = round(7 * edo / 12.0)
+    v_of_to  = triad_pcs((key_to + d7) % edo, 'maj', edo)
 
-    queue   = deque([(key_from % 12, 'maj', [])])
-    visited = {(key_from % 12, 'maj')}
+    queue   = deque([(key_from % edo, 'maj', [])])
+    visited = {(key_from % edo, 'maj')}
 
     while queue:
         r, q, ops = queue.popleft()
         if len(ops) >= 3:
             continue
         for op in ['P', 'L', 'R']:
-            nr, nq = PLR_OPS[op][0](r, q)
+            nr, nq = PLR_OPS[op][0](r, q, edo)
             ns = (nr, nq)
             if ns in visited:
                 continue
             visited.add(ns)
             new_ops  = ops + [op]
-            pcs      = triad_pcs(nr, nq)
+            pcs      = triad_pcs(nr, nq, edo)
             pcs_fs   = frozenset(pcs)
             role_to  = inv_to.get(pcs_fs)
-            is_tonic = sorted(pcs) == sorted(triad_pcs(key_to, 'maj'))
+            is_tonic = sorted(pcs) == sorted(triad_pcs(key_to, 'maj', edo))
             is_dom   = sorted(pcs) == sorted(v_of_to)
 
             if role_to or is_tonic or is_dom:
-                kk_from  = tonal_hierarchy_score(pcs, key_from)["kk_normalized"]
+                kk_from  = tonal_hierarchy_score(pcs, key_from, edo=edo)["tonal_stability"]
                 kk_to    = (role_to["kk_stability"] if role_to else
-                            tonal_hierarchy_score(pcs, key_to)["kk_normalized"])
-                vl_cost  = orbifold_voice_leading(pcs, v_of_to)["distance"]
-                ten_from = tonnetz_tension(pcs, key_from, include_psychoacoustic=False)["tension"]
-                ten_to   = tonnetz_tension(pcs, key_to,   include_psychoacoustic=False)["tension"]
-                tn_kf    = tonnetz_projection_interval(key_from % 12)
-                tn_nr    = tonnetz_projection_interval(nr)
+                            tonal_hierarchy_score(pcs, key_to, edo=edo)["tonal_stability"])
+                vl_cost  = orbifold_voice_leading(pcs, v_of_to, edo)["distance"]
+                ten_from = tonnetz_tension(pcs, key_from, edo, include_psychoacoustic=False)["tension"]
+                ten_to   = tonnetz_tension(pcs, key_to, edo, include_psychoacoustic=False)["tension"]
+                tn_kf    = tonnetz_projection_interval(key_from % edo, edo)
+                tn_nr    = tonnetz_projection_interval(nr, edo)
                 tn_dist  = math.sqrt((tn_kf[0]-tn_nr[0])**2 + (tn_kf[1]-tn_nr[1])**2)
                 score    = _pivot_score(3 - len(new_ops), kk_from, kk_to,
                                         vl_cost, ten_from, ten_to)
@@ -2137,7 +2172,7 @@ def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]
                     "quality"                 : nq,
                     "plr_path"                : new_ops,
                     "plr_path_str"            : "->".join(new_ops),
-                    "roman_from"              : roman_label(nr, nq, key_from),
+                    "roman_from"              : roman_label(nr, nq, key_from, edo),
                     "roman_to"                : roman_to,
                     "tonnetz_distance"        : round(tn_dist, 3),
                     "kk_stability_from"       : round(kk_from, 4),
@@ -2147,9 +2182,9 @@ def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]
                     "tension_to"              : round(ten_to,   4),
                     "pivot_score"             : score,
                     "interpretation"          : (
-                        f"PLR {new_ops} from {nn(key_from)} tonic -> "
-                        f"{nn(nr)}{'m' if nq=='min' else ''} = {roman_to} "
-                        f"in {nn(key_to)} (Tonnetz dist {round(tn_dist,2)})."),
+                        f"PLR {new_ops} from {nn(key_from, edo=edo)} tonic -> "
+                        f"{nn(nr, edo=edo)}{'m' if nq=='min' else ''} = {roman_to} "
+                        f"in {nn(key_to, edo=edo)} (Tonnetz dist {round(tn_dist,2)})."),
                 })
             queue.append((nr, nq, new_ops))
 
@@ -2159,15 +2194,20 @@ def chromatic_mediant_pivots(key_from: int, key_to: int) -> List[Dict[str, Any]]
 
 # ── 9.9  Key-distance helpers ──────────────────────────────────────────────────
 
-def cof_distance(key_a: int, key_b: int) -> int:
+def cof_distance(key_a: int, key_b: int, edo: int = 12) -> int:
     """
-    Steps on the circle of fifths between two keys (range 0-6).
-    C<->G = 1,  C<->F# = 6.
-    Each fifth = 7 semitones; inverse (mod 12): multiply by 7.
+    Steps on the circle of fifths between two keys.
     """
-    d        = abs((key_b - key_a) % 12)
-    cof_step = (d * 7) % 12
-    return min(cof_step, 12 - cof_step)
+    d        = abs((key_b - key_a) % edo)
+    # Circle of fifths steps: find x such that x * steps_fifth = d (mod edo)
+    # steps_fifth = round(edo * log2(1.5))
+    steps_fifth = round(edo * math.log2(3.0 / 2.0))
+    # We need modular inverse of steps_fifth mod edo.
+    # For now, approximate with 12-tone if edo is 12, else just distance.
+    if edo == 12:
+        cof_step = (d * 7) % 12
+        return min(cof_step, 12 - cof_step)
+    return min(d, edo - d)
 
 def _cof_relationship(d: int) -> str:
     return {0: "same key",
@@ -2178,15 +2218,15 @@ def _cof_relationship(d: int) -> str:
             5: "very remote (5 steps)",
             6: "tritone / maximally remote"}.get(d, "remote")
 
-def common_tones_between_keys(key_a: int, key_b: int) -> List[int]:
+def common_tones_between_keys(key_a: int, key_b: int, edo: int = 12) -> List[int]:
     """Pitch classes diatonic in BOTH key_a and key_b (major scales)."""
-    return sorted(set(diatonic_set(key_a)) & set(diatonic_set(key_b)))
+    return sorted(set(diatonic_set(key_a, edo=edo)) & set(diatonic_set(key_b, edo=edo)))
 
 
 # ── 9.10  Modulation path search (Dijkstra) ────────────────────────────────────
 
 def modulation_path_search(key_from: int, key_to: int,
-                           max_depth: int = 6) -> List[Dict[str, Any]]:
+                           max_depth: int = 6, edo: int = 12) -> List[Dict[str, Any]]:
     """
     Dijkstra search for the minimum voice-leading cost modulation path:
         I(key_from)  -->  [diatonic chords in key_from]
@@ -2208,8 +2248,8 @@ def modulation_path_search(key_from: int, key_to: int,
     """
     import heapq
 
-    inv_from_list = diatonic_chord_inventory(key_from, include_borrowed=True)
-    inv_to_list   = diatonic_chord_inventory(key_to,   include_borrowed=True)
+    inv_from_list = diatonic_chord_inventory(key_from, include_borrowed=True, edo=edo)
+    inv_to_list   = diatonic_chord_inventory(key_to,   include_borrowed=True, edo=edo)
 
     from_map: Dict[Tuple[int,str], Dict] = {
         (c["root"], c["quality"]): c for c in inv_from_list}
@@ -2218,18 +2258,18 @@ def modulation_path_search(key_from: int, key_to: int,
 
     pivot_nodes: Set[Tuple[int,str]] = set(from_map) & set(to_map)
 
-    goal_ck  = (key_to % 12, 'maj')
-    start_ck = (key_from % 12, 'maj')
+    goal_ck  = (key_to % edo, 'maj')
+    start_ck = (key_from % edo, 'maj')
 
     # heap: (total_vl_cost, phase, root, quality, path_list)
     start_step = {
-        "root": key_from % 12, "quality": 'maj',
-        "label": nn(key_from),
-        "roman": "I", "key_context": "from",
+        "root": key_from % edo, "quality": 'maj',
+        "label": nn(key_from, edo=edo),
+        "roman": roman_label(key_from, 'maj', key_from, edo), "key_context": "from",
         "function": "TONIC",
         "vl_from_prev": 0, "cumulative_cost": 0,
     }
-    heap: List = [(0, 0, 0, key_from % 12, 'maj', [start_step])]
+    heap: List = [(0, 0, 0, key_from % edo, 'maj', [start_step])]
     _cnt = [1]
     visited: Set[Tuple[int, int, str]] = set()
     best_path: Optional[List[Dict]] = None
@@ -2242,7 +2282,7 @@ def modulation_path_search(key_from: int, key_to: int,
             continue
         visited.add(state)
 
-        cur_pcs = triad_pcs(cur_r, cur_q)
+        cur_pcs = triad_pcs(cur_r, cur_q, edo)
         ck      = (cur_r, cur_q)
 
         # Check goal
@@ -2259,13 +2299,13 @@ def modulation_path_search(key_from: int, key_to: int,
             for (nr, nq), ninfo in from_map.items():
                 if (0, nr, nq) in visited:
                     continue
-                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq))["distance"]
+                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq, edo), edo)["distance"]
                 new_cost = cost + vl
                 if new_cost >= best_cost:
                     continue
                 step = {
                     "root": nr, "quality": nq,
-                    "label": nn(nr) + ("" if nq=="maj" else "m"),
+                    "label": nn(nr, edo=edo) + ("" if nq=="maj" else "m"),
                     "roman": ninfo["roman"], "key_context": "from",
                     "function": ninfo["function"],
                     "vl_from_prev": vl, "cumulative_cost": new_cost,
@@ -2279,8 +2319,8 @@ def modulation_path_search(key_from: int, key_to: int,
                 pivot_step["roman_as_pivot_from"]= from_map[ck]["roman"]
                 pivot_step["roman_as_pivot_to"]  = to_map[ck]["roman"]
                 pivot_step["pivot_note"]         = (
-                    f"{from_map[ck]['roman']} in {nn(key_from)} "
-                    f"= {to_map[ck]['roman']} in {nn(key_to)}")
+                    f"{from_map[ck]['roman']} in {nn(key_from, edo=edo)} "
+                    f"= {to_map[ck]['roman']} in {nn(key_to, edo=edo)}")
                 heapq.heappush(heap,
                     (cost, _cnt[0], 1, cur_r, cur_q, path[:-1] + [pivot_step])); _cnt[0]+=1
 
@@ -2289,13 +2329,13 @@ def modulation_path_search(key_from: int, key_to: int,
             for (nr, nq), ninfo in to_map.items():
                 if (1, nr, nq) in visited:
                     continue
-                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq))["distance"]
+                vl       = orbifold_voice_leading(cur_pcs, triad_pcs(nr, nq, edo), edo)["distance"]
                 new_cost = cost + vl
                 if new_cost >= best_cost:
                     continue
                 step = {
                     "root": nr, "quality": nq,
-                    "label": nn(nr) + ("" if nq=="maj" else "m"),
+                    "label": nn(nr, edo=edo) + ("" if nq=="maj" else "m"),
                     "roman": ninfo["roman"], "key_context": "to",
                     "function": ninfo["function"],
                     "vl_from_prev": vl, "cumulative_cost": new_cost,
@@ -2315,6 +2355,7 @@ def pivot_search(
         include_enharmonic : bool = True,
         include_chromatic  : bool = True,
         max_per_type       : int  = 6,
+        edo                : int  = 12,
 ) -> Dict[str, Any]:
     """
     Master pivot-chord search: runs all pivot-finding strategies and returns
@@ -2345,29 +2386,29 @@ def pivot_search(
       modulation_path: [...]  # Dijkstra-optimal chord sequence
     }
     """
-    cof_d  = cof_distance(key_from, key_to)
-    common = common_tones_between_keys(key_from, key_to)
+    cof_d  = cof_distance(key_from, key_to, edo)
+    common = common_tones_between_keys(key_from, key_to, edo)
 
     pivots_by_type: Dict[str, List] = {}
 
     pivots_by_type["common_chord"] = common_chord_pivots(
-        key_from, key_to, include_borrowed=include_borrowed)[:max_per_type]
+        key_from, key_to, include_borrowed=include_borrowed, edo=edo)[:max_per_type]
 
     if include_secondaries:
         pivots_by_type["secondary_dominant"] = secondary_dominant_pivots(
-            key_from, key_to)[:max_per_type]
+            key_from, key_to, edo=edo)[:max_per_type]
 
     if include_enharmonic:
         pivots_by_type["enharmonic"] = enharmonic_pivots(
-            key_from, key_to)[:max_per_type]
+            key_from, key_to, edo=edo)[:max_per_type]
 
     if include_borrowed:
         pivots_by_type["borrowed"] = borrowed_pivots(
-            key_from, key_to)[:max_per_type]
+            key_from, key_to, edo=edo)[:max_per_type]
 
     if include_chromatic:
         pivots_by_type["chromatic_mediant"] = chromatic_mediant_pivots(
-            key_from, key_to)[:max_per_type]
+            key_from, key_to, edo=edo)[:max_per_type]
 
     # Merge and de-duplicate
     seen_pcs: Set[FrozenSet] = set()
@@ -2387,21 +2428,21 @@ def pivot_search(
     return {
         "key_from"              : key_from,
         "key_to"                : key_to,
-        "key_from_name"         : nn(key_from),
-        "key_to_name"           : nn(key_to),
+        "key_from_name"         : nn(key_from, edo=edo),
+        "key_to_name"           : nn(key_to, edo=edo),
         "cof_distance"          : cof_d,
-        "cof_relationship"      : _cof_relationship(cof_d),
+        "cof_relationship"      : _cof_relationship(cof_d) if edo==12 else "N/A",
         "common_scale_tones"    : common,
-        "common_scale_names"    : [nn(p) for p in common],
+        "common_scale_names"    : [nn(p, edo=edo) for p in common],
         "n_common_tones"        : len(common),
         "diatonic_inventory_from": [
             {"roman": c["roman"], "label": c["label"], "pcs": c["pcs"],
              "function": c["function"]}
-            for c in diatonic_chord_inventory(key_from)],
+            for c in diatonic_chord_inventory(key_from, edo=edo)],
         "diatonic_inventory_to": [
             {"roman": c["roman"], "label": c["label"], "pcs": c["pcs"],
              "function": c["function"]}
-            for c in diatonic_chord_inventory(key_to)],
+            for c in diatonic_chord_inventory(key_to, edo=edo)],
         "pivots_by_type"        : pivots_by_type,
         "all_pivots"            : all_pivots,
         "best_pivot"            : best,
@@ -2424,9 +2465,9 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
     c4hz = cmd.get("c4_hz", 261.625565)
 
     if c == "analyze_chord":
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         res = {"result": "analyze_chord"}
-        res.update(set_class_info(pcs))
+        res.update(set_class_info(pcs, edo))
         res.update(functional_analysis(pcs, key, edo))
         res.update(tonnetz_tension(pcs, key, edo))
         return res
@@ -2440,10 +2481,10 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
         octave     = cmd.get("octave", 4)
         level_db   = cmd.get("level_db", 70.0)
         n_harmonics= cmd.get("n_harmonics", 8)
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         return {
             "result": "psychoacoustic_analysis",
-            **auditory_cortex_model(pcs, key, c4hz, octave, level_db, n_harmonics)
+            **auditory_cortex_model(pcs, key, c4hz, octave, level_db, n_harmonics, edo)
         }
 
     elif c == "spectral_roughness":
@@ -2451,30 +2492,31 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
         Sethares spectral roughness for a chord.
         Accepts: pcs, c4_hz, octave, n_harmonics, rolloff
         """
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         return {
             "result": "spectral_roughness",
             **chord_roughness_psychoacoustic(
                 pcs, c4hz,
                 cmd.get("octave", 4),
                 cmd.get("n_harmonics", 8),
-                cmd.get("rolloff", 0.88))
+                cmd.get("rolloff", 0.88),
+                edo=edo)
         }
 
     elif c == "virtual_pitch":
         """Virtual pitch detection via Terhardt SHS."""
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         return {
             "result": "virtual_pitch",
-            **virtual_pitch_strength(pcs, c4hz, cmd.get("octave", 4))
+            **virtual_pitch_strength(pcs, c4hz, cmd.get("octave", 4), edo=edo)
         }
 
     elif c == "masking_analysis":
         """Spectral masking analysis."""
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         return {
             "result": "masking_analysis",
-            **chord_masking_analysis(pcs, c4hz, cmd.get("level_db", 70.0))
+            **chord_masking_analysis(pcs, c4hz, cmd.get("level_db", 70.0), edo=edo)
         }
 
     elif c == "roughness_curve":
@@ -2492,23 +2534,23 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
 
     elif c == "tonal_hierarchy":
         """Krumhansl-Kessler tonal stability."""
-        if not pcs: pcs = triad_pcs(root, qual)
+        if not pcs: pcs = triad_pcs(root, qual, edo)
         return {
             "result": "tonal_hierarchy",
-            **tonal_hierarchy_score(pcs, key, cmd.get("mode", "major"))
+            **tonal_hierarchy_score(pcs, key, cmd.get("mode", "major"), edo=edo)
         }
 
     elif c == "plr_transform":
         return {"result": "plr_transform",
-                **plr_transform(root, qual, cmd.get("op","P"))}
+                **plr_transform(root, qual, cmd.get("op","P"), edo)}
 
     elif c == "plr_neighbors":
         return {"result": "plr_neighbors",
-                "neighbors": all_plr_neighbors(root, qual)}
+                "neighbors": all_plr_neighbors(root, qual, edo)}
 
     elif c == "plr_path":
         path = plr_path(root, qual,
-                        cmd.get("root_b", 0), cmd.get("quality_b","maj"))
+                        cmd.get("root_b", 0), cmd.get("quality_b","maj"), edo=edo)
         return {"result": "plr_path", "path": path or [],
                 "length": len(path) if path else -1,
                 "reachable": path is not None}
@@ -2523,16 +2565,16 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
                     cmd.get("pitch_classes", []), key, edo, c4hz)}
 
     elif c == "orbifold_distance":
-        vl = orbifold_voice_leading(cmd.get("chord_a",[]), cmd.get("chord_b",[]))
+        vl = orbifold_voice_leading(cmd.get("chord_a",[]), cmd.get("chord_b",[]), edo)
         return {"result": "orbifold_distance", **vl}
 
     elif c == "detect_sequence":
         return {"result": "detect_sequence",
-                **detect_sequence(cmd.get("chords", []))}
+                **detect_sequence(cmd.get("chords", []), edo)}
 
     elif c == "modal_mixture":
         return {"result": "modal_mixture",
-                **modal_mixture_analysis(pcs, key)}
+                **modal_mixture_analysis(pcs, key, edo)}
 
     elif c == "tonnetz_tension":
         return {"result": "tonnetz_tension",
@@ -2549,12 +2591,12 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
         return {"result": "edo_analysis", **edo_analysis(edo)}
 
     elif c == "tonnetz_projection":
-        df, dt = tonnetz_projection_interval(cmd.get("interval", 0))
+        df, dt = tonnetz_projection_interval(cmd.get("interval", 0), edo)
         return {"result": "tonnetz_projection", "df": df, "dt": dt}
 
     elif c == "set_class":
-        if not pcs: pcs = triad_pcs(root, qual)
-        return {"result": "set_class", **set_class_info(pcs)}
+        if not pcs: pcs = triad_pcs(root, qual, edo)
+        return {"result": "set_class", **set_class_info(pcs, edo)}
 
     elif c == "pivot_search":
         """
@@ -2574,6 +2616,7 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 include_enharmonic  = cmd.get("include_enharmonic",  True),
                 include_chromatic   = cmd.get("include_chromatic",   True),
                 max_per_type        = cmd.get("max_per_type", 6),
+                edo                 = edo,
             )
         }
 
@@ -2586,13 +2629,14 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
         """
         return {
             "result": "diatonic_inventory",
-            "key": key, "key_name": nn(key),
+            "key": key, "key_name": nn(key, edo=edo),
             "mode": cmd.get("mode", "Ionian"),
             "chords": diatonic_chord_inventory(
                 key,
                 mode             = cmd.get("mode", "Ionian"),
                 include_sevenths = cmd.get("include_sevenths", True),
                 include_borrowed = cmd.get("include_borrowed", False),
+                edo              = edo,
             )
         }
 
@@ -2609,6 +2653,7 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 cmd.get("key_from", 0),
                 cmd.get("key_to",   0),
                 include_borrowed = cmd.get("include_borrowed", True),
+                edo              = edo,
             )
         }
 
@@ -2626,6 +2671,7 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
                 cmd.get("key_from", 0),
                 cmd.get("key_to",   0),
                 max_depth = cmd.get("max_depth", 6),
+                edo       = edo,
             )
         }
 
@@ -2639,8 +2685,8 @@ def handle(cmd: Dict[str, Any]) -> Dict[str, Any]:
             "root"         : root,
             "quality"      : qual,
             "key"          : key,
-            "roman"        : roman_label(root, qual, key),
-            "degree_semitones": (root - key) % 12,
+            "roman"        : roman_label(root, qual, key, edo),
+            "degree_semitones": (root - key) % edo,
         }
 
     elif c == "ping":

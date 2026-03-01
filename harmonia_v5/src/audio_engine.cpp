@@ -96,7 +96,7 @@ int AudioEngine::addVoice(int midi_note, TimbrePreset timbre) {
     Voice v;
     v.id = next_voice_id_++;
     v.edo = edo_.load();
-    v.name = std::string(NOTE_NAMES[midi_note % 12]) + std::to_string(midi_note/12-1);
+    v.name = noteName(midi_note % 12, midi_note/12-1, 12);
     v.setTimbre(timbre);
     v.setMidiNote(midi_note);
     v.active.store(false);

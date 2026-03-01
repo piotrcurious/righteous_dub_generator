@@ -152,11 +152,11 @@ struct Voice {
             );
         }
 
-        double logf = std::log2(f_actual / C4_HZ); // Relative to C4
-        // Add a small epsilon to handle precision issues near octave boundaries
-        octave = 4 + (int)std::floor(logf + 1e-9);
-        double pc_fraction = logf + 1e-9 - std::floor(logf + 1e-9);
-        pitch_class = (int)std::round(pc_fraction * edo) % edo;
+        // Robust pitch-class and octave mapping
+        double total_steps = std::round(std::log2(f_actual / C4_HZ) * edo);
+        pitch_class = (int)std::fmod(total_steps, (double)edo);
+        if (pitch_class < 0) pitch_class += edo;
+        octave = 4 + (int)std::floor(total_steps / edo);
 
         if (update_coords) computeTonnetzCoords();
     }
@@ -235,8 +235,10 @@ static const char* NOTE_NAMES[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
 };
 
-inline std::string noteName(int pitch_class, int octave) {
-    return std::string(NOTE_NAMES[pitch_class]) + std::to_string(octave);
+inline std::string noteName(int pitch_class, int octave, int edo = 12) {
+    if (edo == 12)
+        return std::string(NOTE_NAMES[pitch_class % 12]) + std::to_string(octave);
+    return "[" + std::to_string(pitch_class) + "]" + std::to_string(octave);
 }
 
 inline double midiToHz(int midi_note) {

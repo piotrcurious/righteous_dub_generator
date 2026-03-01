@@ -61,6 +61,7 @@ struct PsychoacousticAnalysis {
 
     struct {
         float virtual_pitch_hz;
+        int   virtual_pitch_pc;
         std::string virtual_pitch_name;
         float harmonicity;
         std::string harmonicity_label;
@@ -258,7 +259,7 @@ public:
                            FunctionCb cb);
 
     // Full psychoacoustic neural model analysis
-    void queryPsychoacoustic(const std::vector<int>& pcs, int key,
+    void queryPsychoacoustic(const std::vector<int>& pcs, int key, int edo,
                              float c4_hz, int octave, float level_db,
                              PsychoacousticCb cb);
 
@@ -282,15 +283,17 @@ public:
     // Orbifold voice-leading
     void queryOrbifoldDistance(const std::vector<int>& a,
                                 const std::vector<int>& b,
+                                int edo,
                                 OrbifoldCb cb);
 
     // Sequence detection
     void queryDetectSequence(const std::vector<std::pair<int,std::string>>& chords,
+                              int edo,
                               SequenceCb cb);
 
     // Pivot search for modulation
     using PivotSearchCb = std::function<void(const PivotSearchResult&)>;
-    void queryPivotSearch(int key_from, int key_to, PivotSearchCb cb);
+    void queryPivotSearch(int key_from, int key_to, int edo, PivotSearchCb cb);
 
     // EDO analysis
     void queryEDOAnalysis(int edo, RawJsonCb cb);
@@ -327,6 +330,8 @@ private:
 
     mutable std::mutex response_mutex_;
     std::deque<std::string> responses_;
+
+    std::atomic<int> request_counter_{0};
 
     void readerLoop();
     void sendRaw(const std::string& json);

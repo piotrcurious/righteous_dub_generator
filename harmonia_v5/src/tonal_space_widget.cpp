@@ -27,14 +27,15 @@ TonalSpaceWidget::TonalSpaceWidget(int X,int Y,int W,int H,const char* l)
 
 void TonalSpaceWidget::buildSpace() {
     nodes_.clear();
-    float base_radius = 60.0f;
-    float ring_step = 35.0f;
+    float base_radius = 80.0f;
+    float ring_step = 45.0f;
     for (int oct = 2; oct <= 6; oct++) {
         for (int pc = 0; pc < edo_; pc++) {
             TonalNode n;
             n.pitch_class = pc;
             n.octave = oct;
-            n.angle = (float)pc / edo_ * 2.0f * (float)M_PI - (float)M_PI / 2.0f;
+            // Angle: PC 0 is at PI/2 (top). progression is clockwise.
+            n.angle = (float)M_PI / 2.0f - ((float)pc / edo_) * 2.0f * (float)M_PI;
             n.radius = base_radius + (oct - 2) * ring_step;
             n.label = (oct == 4) ? pcLabel(pc, edo_) : "";
             n.cx = n.cy = 0.f;
@@ -76,9 +77,11 @@ void TonalSpaceWidget::screenToWorld(int sx, int sy, float& wx, float& wy) {
 
 TonalNode* TonalSpaceWidget::nodeAt(int sx, int sy) {
     TonalNode* best = nullptr;
-    float bestd = 24.f;
+    float bestd = 20.f; // Threshold for hit-testing
     for (auto& n : nodes_) {
-        float d = std::sqrt((sx - n.cx) * (sx - n.cx) + (sy - n.cy) * (sy - n.cy));
+        float dx = (float)sx - n.cx;
+        float dy = (float)sy - n.cy;
+        float d = std::sqrt(dx*dx + dy*dy);
         if (d < bestd) { bestd = d; best = &n; }
     }
     return best;
@@ -207,7 +210,8 @@ void TonalSpaceWidget::drawNodes() {
         float pr, pg, pb;
         Voice::pcColorHSV(n.pitch_class, edo_, pr, pg, pb);
 
-        bool is_highlighted = (std::find(highlighted_pcs_.begin(), highlighted_pcs_.end(), n.pitch_class) != highlighted_pcs_.end());
+        bool is_highlighted = (std::find(highlighted_pcs_.begin(), highlighted_pcs_.end(), n.pitch_class) != highlighted_pcs_.end()) ||
+                              (n.pitch_class == highlighted_pc_ && (highlighted_oct_ == -1 || n.octave == highlighted_oct_));
 
         if (has_voice) {
             drawFilledCircle(n.cx, n.cy, 12.f, vr, vg, vb, 1.f);
@@ -282,7 +286,7 @@ int TonalSpaceWidget::handle(int event) {
         if (Fl::event_button() == FL_LEFT_MOUSE) {
             TonalNode* n = nodeAt(drag_x_, drag_y_);
             if (n && node_click_cb_) {
-                // Return PC and octave as tx/ty surrogates
+                // Return PC and octave as surrogates
                 node_click_cb_(n->pitch_class, n->pitch_class, n->octave);
             }
         }
@@ -293,6 +297,9 @@ int TonalSpaceWidget::handle(int event) {
             drag_x_ = Fl::event_x(); drag_y_ = Fl::event_y();
             redraw();
         }
+        return 1;
+    case FL_RELEASE:
+        dragging_ = false;
         return 1;
     case FL_MOUSEWHEEL:
         zoom_ *= (Fl::event_dy() < 0) ? 1.1f : 0.91f;

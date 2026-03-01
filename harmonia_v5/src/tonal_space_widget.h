@@ -58,12 +58,10 @@ public:
         highlighted_pcs_ = pcs;
         redraw();
     }
-    void setHighlightedNode(int tx, int ty) {
-        // tx/ty are legacy Tonnetz coords; for circular space we map to PC
-        // In this version, we'll just use PC for highlighting.
+    void setHighlightedNode(int pc, int oct) {
         highlighted_pcs_.clear();
-        // Since we don't have a 1:1 mapping back to PC easily without EDO info here,
-        // we'll rely on the app to pass PC if possible or we calculate it.
+        highlighted_pc_ = pc;
+        highlighted_oct_ = oct;
         redraw();
     }
 
@@ -83,6 +81,8 @@ private:
     std::vector<RoughnessRecord> roughness_;
     std::vector<std::pair<int,int>> progression_path_;
     std::vector<int> highlighted_pcs_;
+    int highlighted_pc_{-1};
+    int highlighted_oct_{-1};
 
     // ── camera
     float pan_x_{0.f}, pan_y_{0.f};

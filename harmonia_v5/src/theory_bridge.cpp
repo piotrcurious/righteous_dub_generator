@@ -103,7 +103,8 @@ void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int e
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"analyze_chord\",\"pcs\":" + arr +
+    std::string tag = "analyze_chord_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"analyze_chord\",\"tag\":\"" + tag + "\",\"pcs\":" + arr +
                        ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         FunctionalAnalysis fa;
@@ -141,13 +142,14 @@ void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int e
         if (cb) cb(fa, tt);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"analyze_chord", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryPLRNeighbors(int root, const std::string& quality,
                                       PLRNeighborsCb cb) {
-    std::string json = "{\"cmd\":\"plr_neighbors\",\"tag\":\"plr_neighbors\",\"root\":" + std::to_string(root) +
+    std::string tag = "plr_neighbors_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"plr_neighbors\",\"tag\":\"" + tag + "\",\"root\":" + std::to_string(root) +
                        ",\"quality\":\"" + quality + "\"}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<PLRTransform> nbrs;
@@ -161,14 +163,15 @@ void TheoryBridge::queryPLRNeighbors(int root, const std::string& quality,
         if (cb) cb(nbrs);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"plr_neighbors", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryPLRPath(int ra, const std::string& qa,
                                  int rb, const std::string& qb,
                                  PLRPathCb cb) {
-    std::string json = "{\"cmd\":\"plr_path\",\"tag\":\"plr_path\",\"root_a\":" + std::to_string(ra) +
+    std::string tag = "plr_path_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"plr_path\",\"tag\":\"" + tag + "\",\"root_a\":" + std::to_string(ra) +
                        ",\"quality_a\":\"" + qa + "\",\"root_b\":" + std::to_string(rb) +
                        ",\"quality_b\":\"" + qb + "\"}";
     auto raw_cb = [cb](const std::string& resp) {
@@ -177,13 +180,14 @@ void TheoryBridge::queryPLRPath(int ra, const std::string& qa,
         if (cb) cb(path, reachable);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"plr_path", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, int key, int edo,
                                          ResolutionsCb cb) {
-    std::string json = "{\"cmd\":\"resolution_paths\",\"tag\":\"resolution_paths\",\"root\":" + std::to_string(root) +
+    std::string tag = "resolution_paths_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"resolution_paths\",\"tag\":\"" + tag + "\",\"root\":" + std::to_string(root) +
                        ",\"quality\":\"" + quality + "\",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<ResolutionPath> paths;
@@ -197,24 +201,25 @@ void TheoryBridge::queryResolutionPaths(int root, const std::string& quality, in
         if (cb) cb(paths);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"resolution_paths", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
-void TheoryBridge::queryPsychoacoustic(const std::vector<int>& pcs, int key,
+void TheoryBridge::queryPsychoacoustic(const std::vector<int>& pcs, int key, int edo,
                                        float c4_hz, int octave, float level_db,
                                        PsychoacousticCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"psychoacoustic_analysis\",\"tag\":\"psychoacoustic\",\"pcs\":" + arr +
-                       ",\"key\":" + std::to_string(key) + ",\"c4_hz\":" + std::to_string(c4_hz) +
+    std::string tag = "psychoacoustic_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"psychoacoustic_analysis\",\"tag\":\"" + tag + "\",\"pcs\":" + arr +
+                       ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + ",\"c4_hz\":" + std::to_string(c4_hz) +
                        ",\"octave\":" + std::to_string(octave) + ",\"level_db\":" + std::to_string(level_db) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         if (cb) cb(parsePsychoacoustic(resp));
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"psychoacoustic", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
@@ -223,7 +228,8 @@ void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key, 
     std::string arr = "[";
     for (size_t i=0;i<pcs.size();i++) { arr+=std::to_string(pcs[i]); if(i+1<pcs.size()) arr+=","; }
     arr += "]";
-    std::string json = "{\"cmd\":\"suggest_completion\",\"tag\":\"suggest_completion\",\"pitch_classes\":" + arr +
+    std::string tag = "suggest_completion_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"suggest_completion\",\"tag\":\"" + tag + "\",\"pitch_classes\":" + arr +
                        ",\"key\":" + std::to_string(key) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         std::vector<CompletionSuggestion> sugs;
@@ -237,29 +243,32 @@ void TheoryBridge::querySuggestCompletion(const std::vector<int>& pcs, int key, 
         if (cb) cb(sugs);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"suggest_completion", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryOrbifoldDistance(const std::vector<int>& a,
                                           const std::vector<int>& b,
+                                          int edo,
                                           OrbifoldCb cb) {
     auto mkArr = [](const std::vector<int>& v) {
         std::string s="["; for(size_t i=0;i<v.size();i++){s+=std::to_string(v[i]);if(i+1<v.size())s+=",";}; return s+"]";
     };
-    std::string json = "{\"cmd\":\"orbifold_distance\",\"tag\":\"orbifold_distance\",\"chord_a\":" + mkArr(a) +
-                       ",\"chord_b\":" + mkArr(b) + "}";
+    std::string tag = "orbifold_distance_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"orbifold_distance\",\"tag\":\"" + tag + "\",\"chord_a\":" + mkArr(a) +
+                       ",\"chord_b\":" + mkArr(b) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         if (cb) cb(parseVoiceLeading(resp));
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"orbifold_distance", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
-void TheoryBridge::queryPivotSearch(int key_from, int key_to, PivotSearchCb cb) {
-    std::string json = "{\"cmd\":\"pivot_search\",\"tag\":\"pivot_search\",\"key_from\":" + std::to_string(key_from) +
-                       ",\"key_to\":" + std::to_string(key_to) + "}";
+void TheoryBridge::queryPivotSearch(int key_from, int key_to, int edo, PivotSearchCb cb) {
+    std::string tag = "pivot_search_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"pivot_search\",\"tag\":\"" + tag + "\",\"key_from\":" + std::to_string(key_from) +
+                       ",\"key_to\":" + std::to_string(key_to) + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [this, cb](const std::string& resp) {
         PivotSearchResult res;
         res.key_from         = jInt(resp, "key_from");
@@ -339,12 +348,12 @@ void TheoryBridge::queryPivotSearch(int key_from, int key_to, PivotSearchCb cb) 
         if (cb) cb(res);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"pivot_search", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryDetectSequence(
-    const std::vector<std::pair<int,std::string>>& chords, SequenceCb cb) {
+    const std::vector<std::pair<int,std::string>>& chords, int edo, SequenceCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<chords.size();i++) {
         arr += "{\"root\":" + std::to_string(chords[i].first) +
@@ -352,7 +361,8 @@ void TheoryBridge::queryDetectSequence(
         if (i+1 < chords.size()) arr += ",";
     }
     arr += "]";
-    std::string json = "{\"cmd\":\"detect_sequence\",\"tag\":\"detect_sequence\",\"chords\":" + arr + "}";
+    std::string tag = "detect_sequence_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"detect_sequence\",\"tag\":\"" + tag + "\",\"chords\":" + arr + ",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) {
         SequenceInfo si;
         si.type                    = jStr(resp,"sequence_type");
@@ -364,15 +374,16 @@ void TheoryBridge::queryDetectSequence(
         if (cb) cb(si);
     };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"detect_sequence", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
 void TheoryBridge::queryEDOAnalysis(int edo, RawJsonCb cb) {
-    std::string json = "{\"cmd\":\"edo_analysis\",\"tag\":\"edo_analysis\",\"edo\":" + std::to_string(edo) + "}";
+    std::string tag = "edo_analysis_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"edo_analysis\",\"tag\":\"" + tag + "\",\"edo\":" + std::to_string(edo) + "}";
     auto raw_cb = [cb](const std::string& resp) { if(cb) cb(resp); };
     { std::lock_guard<std::mutex> lk(pending_mutex_);
-      pending_cbs_.push_back({"edo_analysis", raw_cb}); }
+      pending_cbs_.push_back({tag, raw_cb}); }
     sendRaw(json);
 }
 
@@ -400,13 +411,25 @@ static size_t findValPos(const std::string& j, const std::string& k) {
 int TheoryBridge::jInt(const std::string& j, const std::string& k, int d) {
     size_t p = findValPos(j, k);
     if (p == std::string::npos) return d;
-    try { return std::stoi(j.substr(p)); } catch(...) { return d; }
+    try {
+        const char* start = j.c_str() + p;
+        char* end = nullptr;
+        int val = std::strtol(start, &end, 10);
+        if (end == start) return d;
+        return val;
+    } catch(...) { return d; }
 }
 
 float TheoryBridge::jFloat(const std::string& j, const std::string& k, float d) {
     size_t p = findValPos(j, k);
     if (p == std::string::npos) return d;
-    try { return std::stof(j.substr(p)); } catch(...) { return d; }
+    try {
+        const char* start = j.c_str() + p;
+        char* end = nullptr;
+        float val = std::strtof(start, &end);
+        if (end == start) return d;
+        return val;
+    } catch(...) { return d; }
 }
 
 std::string TheoryBridge::jStr(const std::string& j, const std::string& k,
@@ -654,6 +677,7 @@ PsychoacousticAnalysis TheoryBridge::parsePsychoacoustic(const std::string& j) {
     std::string l2 = getSub(j, "level_2_brainstem");
     if (!l2.empty()) {
         pa.level2.virtual_pitch_hz = jFloat(l2, "virtual_pitch_hz");
+        pa.level2.virtual_pitch_pc = jInt(l2, "virtual_pitch_pc");
         pa.level2.virtual_pitch_name = jStr(l2, "virtual_pitch_name");
         pa.level2.harmonicity = jFloat(l2, "harmonicity");
         pa.level2.harmonicity_label = jStr(l2, "harmonicity_label");
