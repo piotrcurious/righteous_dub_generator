@@ -193,8 +193,13 @@ void AudioEngine::setEDO(int edo) {
     std::lock_guard<std::mutex> lk(voices_mutex_);
     for (auto& v : voices_) {
         v.edo = edo;
-        v.setFrequency(v.frequency, false); // re-calculate pitch_class, keep coords
+        // Snap frequency to the closest step in the new EDO grid
+        double total_steps = std::round(std::log2(v.frequency / C4_HZ) * edo);
+        double snapped_freq = C4_HZ * std::pow(2.0, total_steps / edo);
+
+        v.setFrequency(snapped_freq, false); // false = don't update Tonnetz coords (preserve JI role)
         Voice::pcColorHSV(v.pitch_class, v.edo, v.color[0], v.color[1], v.color[2]);
+        v.name = noteName(v.pitch_class, v.octave, edo);
     }
 }
 

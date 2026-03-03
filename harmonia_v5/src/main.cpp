@@ -531,9 +531,13 @@ void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
 
     auto voices = audio_->getVoiceSnapshot(); int eid = -1;
     for (auto& v : voices) {
-        // Use a small epsilon in log space for robust comparison
-        double diff_steps = std::abs(std::log2(v.frequency / freq) * current_edo_);
-        if (diff_steps < 0.1) { eid = v.id; break; }
+        // Match by pitch class and octave ring in current EDO
+        if (v.pitch_class == pc && v.octave == oct) {
+            eid = v.id; break;
+        }
+        // Fallback: match by frequency proximity (within 1 cent)
+        double diff_cents = std::abs(1200.0 * std::log2(v.frequency / freq));
+        if (diff_cents < 1.0) { eid = v.id; break; }
     }
 
     if (eid != -1) removeVoice(eid);

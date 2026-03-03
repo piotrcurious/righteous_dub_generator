@@ -57,6 +57,12 @@ void TonalSpaceWidget::setEDO(int edo) {
     if (edo_ == edo) return;
     edo_ = edo;
     buildSpace();
+    // Update screen coordinates immediately so node picking works before next draw
+    for (auto& n : nodes_) {
+        float wx = n.radius * cosf(n.angle + rotation_);
+        float wy = n.radius * sinf(n.angle + rotation_);
+        worldToScreen(wx, wy, n.cx, n.cy);
+    }
     redraw();
 }
 
@@ -76,15 +82,44 @@ void TonalSpaceWidget::screenToWorld(int sx, int sy, float& wx, float& wy) {
 }
 
 TonalNode* TonalSpaceWidget::nodeAt(int sx, int sy) {
-    TonalNode* best = nullptr;
-    float bestd = 20.f; // Threshold for hit-testing
-    for (auto& n : nodes_) {
+    float wx, wy;
+    screenToWorld(sx, sy, wx, wy);
+
+    float r = std::sqrt(wx*wx + wy*wy);
+    float theta = std::atan2(wy, wx);
+
+    // Normalize theta to match n.angle + rotation_
+    // n.angle = M_PI/2 - (pc/edo)*2PI
+    // So theta - rotation_ = M_PI/2 - (pc/edo)*2PI
+    // (pc/edo)*2PI = M_PI/2 - (theta - rotation_)
+
+    float target_angle = (float)M_PI / 2.0f - (theta - rotation_);
+    // Normalize to [0, 2PI)
+    while (target_angle < 0) target_angle += 2.0f * (float)M_PI;
+    while (target_angle >= 2.0f * (float)M_PI) target_angle -= 2.0f * (float)M_PI;
+
+    int pc = (int)std::round((target_angle / (2.0f * (float)M_PI)) * edo_) % edo_;
+
+    float base_radius = 80.0f;
+    float ring_step = 45.0f;
+    int oct = (int)std::round((r - base_radius) / ring_step) + 2;
+
+    if (oct < 2 || oct > 6) return nullptr;
+
+    int idx = (oct - 2) * edo_ + pc;
+    if (idx >= 0 && idx < (int)nodes_.size()) {
+        TonalNode& n = nodes_[idx];
+        // Ensure n.cx/n.cy are up to date for the distance check
+        float wx = n.radius * cosf(n.angle + rotation_);
+        float wy = n.radius * sinf(n.angle + rotation_);
+        worldToScreen(wx, wy, n.cx, n.cy);
+
         float dx = (float)sx - n.cx;
         float dy = (float)sy - n.cy;
-        float d = std::sqrt(dx*dx + dy*dy);
-        if (d < bestd) { bestd = d; best = &n; }
+        if (std::sqrt(dx*dx + dy*dy) < 25.f * zoom_) return &n;
     }
-    return best;
+
+    return nullptr;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
