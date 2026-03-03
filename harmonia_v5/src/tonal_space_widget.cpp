@@ -15,7 +15,10 @@ static const char* NOTE_NAMES_FLAT[12] = {
 };
 
 static std::string pcLabel(int pc, int edo) {
-    if (edo == 12) return NOTE_NAMES_FLAT[pc % 12];
+    if (edo == 12) {
+        int idx = ((pc % 12) + 12) % 12;
+        return NOTE_NAMES_FLAT[idx];
+    }
     return std::to_string(pc);
 }
 

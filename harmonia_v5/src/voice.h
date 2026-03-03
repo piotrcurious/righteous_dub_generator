@@ -35,14 +35,14 @@ struct Voice {
     int         id;           // unique across session
 
     // ── pitch
-    double frequency;         // fundamental Hz (concert pitch A4=440)
-    int    pitch_class;       // 0..edo-1
-    int    octave;            // MIDI octave (4 = middle C octave)
+    double frequency{C4_HZ};  // fundamental Hz (concert pitch A4=440)
+    int    pitch_class{0};    // 0..edo-1
+    int    octave{4};         // MIDI octave (4 = middle C octave)
     int    edo{12};
-    float  detune_cents;      // fine tuning in cents (−50 to +50)
+    float  detune_cents{0.f}; // fine tuning in cents (−50 to +50)
 
     // ── amplitude / envelope
-    float  amplitude;         // master gain 0..1
+    float  amplitude{0.6f};   // master gain 0..1
     float  attack_ms;         // ADSR
     float  decay_ms;
     float  sustain_level;
@@ -88,11 +88,10 @@ struct Voice {
     float color[3]{0.5f, 0.7f, 1.0f};   // RGB for UI
 
     // ────── construction
-    Voice() {
+    Voice() : id(-1) {
         harmonic_amp.fill(0.f);
         harmonic_phase.fill(0.f);
         harmonic_phase_inc.fill(0.f);
-        amplitude = 0.6f;
         attack_ms = 20.f; decay_ms = 80.f; sustain_level = 0.7f; release_ms = 300.f;
         timbre = TimbrePreset::SINE;
         setTimbre(timbre);
@@ -236,8 +235,10 @@ static const char* NOTE_NAMES[12] = {
 };
 
 inline std::string noteName(int pitch_class, int octave, int edo = 12) {
-    if (edo == 12)
-        return std::string(NOTE_NAMES[pitch_class % 12]) + std::to_string(octave);
+    if (edo == 12) {
+        int idx = ((pitch_class % 12) + 12) % 12;
+        return std::string(NOTE_NAMES[idx]) + std::to_string(octave);
+    }
     return "[" + std::to_string(pitch_class) + "]" + std::to_string(octave);
 }
 

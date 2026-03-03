@@ -395,7 +395,10 @@ void AudioEngine::identifyChord(AbstractObject& obj) {
     if (pcs.empty()) { obj.chord_name = "—"; obj.quality = ""; obj.confidence = 0.f; return; }
 
     auto get_pc_name = [&](int pc) {
-        if (edo == 12) return std::string(NOTE_NAMES[pc % 12]);
+        if (edo == 12) {
+            int idx = ((pc % 12) + 12) % 12;
+            return std::string(NOTE_NAMES[idx]);
+        }
         return std::to_string(pc);
     };
 
