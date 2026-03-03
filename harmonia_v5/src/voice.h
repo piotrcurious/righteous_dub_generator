@@ -100,7 +100,7 @@ struct Voice {
     // std::atomic is not copyable — provide explicit copy/move
     Voice(const Voice& o)
         : name(o.name), id(o.id), frequency(o.frequency), pitch_class(o.pitch_class),
-          octave(o.octave), detune_cents(o.detune_cents), amplitude(o.amplitude),
+          octave(o.octave), edo(o.edo), detune_cents(o.detune_cents), amplitude(o.amplitude),
           attack_ms(o.attack_ms), decay_ms(o.decay_ms), sustain_level(o.sustain_level),
           release_ms(o.release_ms), timbre(o.timbre),
           harmonic_amp(o.harmonic_amp), harmonic_phase(o.harmonic_phase),
@@ -114,7 +114,7 @@ struct Voice {
     Voice& operator=(const Voice& o) {
         if (this == &o) return *this;
         name=o.name; id=o.id; frequency=o.frequency; pitch_class=o.pitch_class;
-        octave=o.octave; detune_cents=o.detune_cents; amplitude=o.amplitude;
+        octave=o.octave; edo=o.edo; detune_cents=o.detune_cents; amplitude=o.amplitude;
         attack_ms=o.attack_ms; decay_ms=o.decay_ms; sustain_level=o.sustain_level;
         release_ms=o.release_ms; timbre=o.timbre;
         harmonic_amp=o.harmonic_amp; harmonic_phase=o.harmonic_phase;
@@ -128,7 +128,7 @@ struct Voice {
 
     Voice(Voice&& o) noexcept
         : name(std::move(o.name)), id(o.id), frequency(o.frequency),
-          pitch_class(o.pitch_class), octave(o.octave), detune_cents(o.detune_cents),
+          pitch_class(o.pitch_class), octave(o.octave), edo(o.edo), detune_cents(o.detune_cents),
           amplitude(o.amplitude), attack_ms(o.attack_ms), decay_ms(o.decay_ms),
           sustain_level(o.sustain_level), release_ms(o.release_ms), timbre(o.timbre),
           harmonic_amp(o.harmonic_amp), harmonic_phase(o.harmonic_phase),
