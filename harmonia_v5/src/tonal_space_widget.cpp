@@ -216,10 +216,10 @@ void TonalSpaceWidget::drawNodes() {
         if (has_voice) {
             drawFilledCircle(n.cx, n.cy, 12.f, vr, vg, vb, 1.f);
             drawRing(n.cx, n.cy, 15.f, 2.f, 1.f, 1.f, 1.f, 0.7f);
-            if (is_highlighted) drawRing(n.cx, n.cy, 18.f, 3.f, 1.f, 1.f, 0.f, 0.9f);
+            if (is_highlighted) drawRing(n.cx, n.cy, 18.f, 3.f, 1.f, 1.0f, 0.4f, 0.9f);
         } else if (is_highlighted) {
-            drawFilledCircle(n.cx, n.cy, 10.f, 1.0f, 1.0f, 0.6f, 0.8f);
-            drawRing(n.cx, n.cy, 12.f, 2.f, 1.0f, 1.0f, 0.0f, 0.8f);
+            drawFilledCircle(n.cx, n.cy, 10.f, pr, pg, pb, 0.8f);
+            drawRing(n.cx, n.cy, 12.f, 2.f, 1.0f, 1.0f, 1.0f, 0.9f);
         } else {
             drawFilledCircle(n.cx, n.cy, 8.f, pr*.4f, pg*.4f, pb*.4f, 1.f);
             drawRing(n.cx, n.cy, 8.f, 1.f, pr, pg, pb, 0.5f);

@@ -26,6 +26,7 @@ set(SOURCES
     src/main.cpp
     src/audio_engine.cpp
     src/tonal_space_widget.cpp
+    src/psycho_graph_widget.cpp
     src/theory_bridge.cpp
 )
 

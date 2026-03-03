@@ -40,6 +40,7 @@
 #include "voice.h"
 #include "audio_engine.h"
 #include "tonal_space_widget.h"
+#include "psycho_graph_widget.h"
 #include "theory_bridge.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +179,7 @@ private:
     Fl_Tabs*     tabs_right_{nullptr};
     Fl_Group*    grp_theory_{nullptr};
     Fl_Group*    grp_modulation_{nullptr};
+    Fl_Group*    grp_perception_{nullptr};
     Fl_Group*    grp_instrument_{nullptr};
 
     // Right – structural theory panel
@@ -192,6 +194,9 @@ private:
     Fl_Button*   btn_psycho_{nullptr};
     Fl_Button*   btn_edo_{nullptr};
     Fl_Output*   out_orbifold_{nullptr};
+
+    // Right – perception panel
+    PsychoGraphWidget* perception_view_{nullptr};
 
     // Right – modulation panel
     Fl_Choice*   ch_target_key_{nullptr};
@@ -209,6 +214,7 @@ private:
     Fl_Browser* browser_keys_{nullptr};
     Fl_Button* btn_add_chord_{nullptr};
     Fl_Button* btn_clear_keys_{nullptr};
+    Fl_Light_Button* btn_sustain_{nullptr};
 
     // Bottom – spectrum + roughness
     SpectrumWidget*   spectrum_{nullptr};
@@ -271,7 +277,8 @@ private:
     int handle(int event);
 
     void onTonalSpaceClick(int pc, int oct);
-    std::pair<int,int> highlightNodeForPC(int pc, int oct = -100);
+    void highlightNodes(const std::vector<int>& pcs);
+    void highlightNode(int pc, int oct = -100);
 
     std::string theoryDir_;
 };
@@ -365,16 +372,35 @@ void HarmoniaApp::buildUI() {
         grp_theory_ = new Fl_Group(tabs_right_->x(), content_y + 25, THEORY_PANEL_W, content_h - 25, "Theory");
         int py = content_y + 30, px = tabs_right_->x() + 4, pw = THEORY_PANEL_W - 8;
         new Fl_Box(px, py, pw, 16, "HARMONIC FUNCTION"); py += 18;
-        browser_function_ = new Fl_Browser(px, py, pw, 120); browser_function_->textsize(9); py += 122;
+        browser_function_ = new Fl_Browser(px, py, pw, 120);
+        browser_function_->textsize(9);
+        browser_function_->type(FL_HOLD_BROWSER);
+        browser_function_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
+        py += 122;
         btn_analyze_ = new Fl_Button(px, py, pw, 20, "Analyse Structure"); py += 24;
+
         new Fl_Box(px, py, pw, 16, "RESOLUTION PATHS"); py += 18;
-        browser_resolutions_ = new Fl_Browser(px, py, pw, 120); browser_resolutions_->textsize(9); py += 122;
+        browser_resolutions_ = new Fl_Browser(px, py, pw, 120);
+        browser_resolutions_->textsize(9);
+        browser_resolutions_->type(FL_HOLD_BROWSER);
+        browser_resolutions_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
+        py += 122;
         btn_resolve_ = new Fl_Button(px, py, pw, 20, "Show Resolutions"); py += 24;
+
         new Fl_Box(px, py, pw, 16, "COMPLETION"); py += 18;
-        browser_completion_ = new Fl_Browser(px, py, pw, 80); browser_completion_->textsize(9); py += 82;
+        browser_completion_ = new Fl_Browser(px, py, pw, 80);
+        browser_completion_->textsize(9);
+        browser_completion_->type(FL_HOLD_BROWSER);
+        browser_completion_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
+        py += 82;
         btn_complete_ = new Fl_Button(px, py, pw, 20, "Suggest Voice"); py += 24;
+
         new Fl_Box(px, py, pw, 16, "PSYCHOACOUSTICS"); py += 18;
-        browser_psycho_ = new Fl_Browser(px, py, pw, 80); browser_psycho_->textsize(9); py += 82;
+        browser_psycho_ = new Fl_Browser(px, py, pw, 80);
+        browser_psycho_->textsize(9);
+        browser_psycho_->type(FL_HOLD_BROWSER);
+        browser_psycho_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
+        py += 82;
         btn_psycho_ = new Fl_Button(px, py, pw, 20, "Neural Analysis");
         grp_theory_->end();
 
@@ -383,15 +409,27 @@ void HarmoniaApp::buildUI() {
         py = content_y + 30; new Fl_Box(px, py, pw, 16, "PIVOT SEARCH"); py += 20;
         ch_target_key_ = new Fl_Choice(px+80, py, 70, 20, "Target:"); for(int i=0;i<12;i++) ch_target_key_->add(NOTE_NAMES[i]); ch_target_key_->value(7); py += 25;
         btn_find_pivots_ = new Fl_Button(px, py, pw, 22, "Find Paths"); py += 26;
-        browser_pivots_ = new Fl_Browser(px, py, pw, content_h - (py-content_y) - 10); browser_pivots_->textsize(9);
+        browser_pivots_ = new Fl_Browser(px, py, pw, content_h - (py-content_y) - 10);
+        browser_pivots_->textsize(9);
+        browser_pivots_->type(FL_HOLD_BROWSER);
+        browser_pivots_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
         grp_modulation_->end();
 
-        // Tab 3: Instrument
+        // Tab 3: Perception
+        grp_perception_ = new Fl_Group(tabs_right_->x(), content_y + 25, THEORY_PANEL_W, content_h - 25, "Perception");
+        perception_view_ = new PsychoGraphWidget(tabs_right_->x() + 4, content_y + 30, THEORY_PANEL_W - 8, content_h - 40);
+        grp_perception_->end();
+
+        // Tab 4: Instrument
         grp_instrument_ = new Fl_Group(tabs_right_->x(), content_y + 25, THEORY_PANEL_W, content_h - 25, "Instrument");
         py = content_y + 30; new Fl_Box(px, py, pw, 16, "KEYBOARD BUILDER"); py += 20;
-        browser_keys_ = new Fl_Browser(px, py, pw, content_h - 120); py += content_h - 118;
+        browser_keys_ = new Fl_Browser(px, py, pw, content_h - 150);
+        browser_keys_->type(FL_HOLD_BROWSER);
+        browser_keys_->when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
+        py += content_h - 148;
         btn_add_chord_ = new Fl_Button(px, py, pw, 26, "+ Add Current"); py += 30;
-        btn_clear_keys_ = new Fl_Button(px, py, pw, 26, "Clear Keys");
+        btn_clear_keys_ = new Fl_Button(px, py, pw/2 - 2, 26, "Clear");
+        btn_sustain_ = new Fl_Light_Button(px + pw/2 + 2, py, pw/2 - 2, 26, "Sustain");
         grp_instrument_->end();
 
         tabs_right_->end();
@@ -510,10 +548,17 @@ void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
     updateTheory();
 }
 
-std::pair<int,int> HarmoniaApp::highlightNodeForPC(int pc, int oct) {
-    if (pc < 0) { tonal_space_->setHighlightedPC(-1); tonal_space_->setHighlightedNode(-1, -1); }
-    else { if (oct != -100) tonal_space_->setHighlightedNode(pc, oct); else tonal_space_->setHighlightedPC(pc); }
-    return {pc, oct};
+void HarmoniaApp::highlightNodes(const std::vector<int>& pcs) {
+    tonal_space_->setHighlightedPCs(pcs);
+}
+void HarmoniaApp::highlightNode(int pc, int oct) {
+    if (pc < 0) {
+        tonal_space_->setHighlightedPC(-1);
+        tonal_space_->setHighlightedNode(-1, -1);
+    } else {
+        if (oct != -100) tonal_space_->setHighlightedNode(pc, oct);
+        else tonal_space_->setHighlightedPC(pc);
+    }
 }
 
 void HarmoniaApp::updateFunctionalAnalysis() {
@@ -545,6 +590,7 @@ void HarmoniaApp::updateCompletionSuggestions() {
 void HarmoniaApp::updatePsychoAnalysis() {
     auto voices = audio_->getVoiceSnapshot(); std::vector<int> pcs; for(auto& v:voices) if(v.active) pcs.push_back(v.pitch_class); if(pcs.empty()) return;
     theory_->queryPsychoacoustic(pcs, current_key_, current_edo_, (float)C4_HZ, 4, 70.0f, [this](const PsychoacousticAnalysis& pa){
+        perception_view_->update(pa);
         browser_psycho_->clear(); char buf[128]; snprintf(buf,128,"@bTENSION: %s (%.2f)", pa.perceptual_tension_label.c_str(), pa.perceptual_tension);
         browser_psycho_->add(buf); snprintf(buf,128,"  Consonance: %.2f", pa.level1.consonance_score); browser_psycho_->add(buf);
         snprintf(buf,128,"  Harmonicity: %.2f", pa.level2.harmonicity); browser_psycho_->add(buf);
@@ -565,22 +611,79 @@ void HarmoniaApp::updatePivotSearch() {
 }
 void HarmoniaApp::updateTheory() { updateFunctionalAnalysis(); updateResolutionPaths(); updateCompletionSuggestions(); updatePsychoAnalysis(); }
 void HarmoniaApp::playChord(const ChordKey& chord, bool sustain) {
-    (void)sustain;
     for(const auto& n:chord.notes){
-        int id = audio_->addVoice(60);
-        if(id>=0){
-            audio_->setVoiceFrequency(id, n.freq);
-            audio_->noteOn(id);
-            if(auto* s=findStrip(id)) s->manual=true;
+        // find if note already active
+        auto voices = audio_->getVoiceSnapshot();
+        int eid = -1;
+        for(auto& v : voices) {
+            double ds = std::abs(std::log2(v.frequency / n.freq) * current_edo_);
+            if (ds < 0.05) { eid = v.id; break; }
+        }
+        if (eid == -1) {
+            int id = audio_->addVoice(60);
+            if (id >= 0) {
+                audio_->setVoiceFrequency(id, n.freq);
+                audio_->noteOn(id);
+                if (auto* s = findStrip(id)) s->manual = sustain;
+            }
+        } else {
+            audio_->noteOn(eid);
+            if (auto* s = findStrip(eid)) s->manual = sustain;
         }
     }
     updateTheory();
 }
-void HarmoniaApp::releaseChord(const ChordKey& chord) { (void)chord; }
+void HarmoniaApp::releaseChord(const ChordKey& chord) {
+    if (btn_sustain_->value()) return;
+    for(const auto& n : chord.notes) {
+        auto voices = audio_->getVoiceSnapshot();
+        for(auto& v : voices) {
+            double ds = std::abs(std::log2(v.frequency / n.freq) * current_edo_);
+            if (ds < 0.05) {
+                if (auto* s = findStrip(v.id)) {
+                    if (!s->manual) audio_->noteOff(v.id);
+                }
+                break;
+            }
+        }
+    }
+}
 
 int HarmoniaApp::handle(int event) {
     if(event == FL_KEYDOWN){
-        int k = Fl::event_key(); if(k >= '1' && k <= '9'){ int i = k-'1'; if(i<(int)instrument_keyboard_.size()) playChord(instrument_keyboard_[i], false); return 1; }
+        if (Fl::focus() && (dynamic_cast<Fl_Input*>(Fl::focus()) || dynamic_cast<Fl_Spinner*>(Fl::focus()))) return 0;
+        int k = Fl::event_key();
+        if(k >= '1' && k <= '9'){
+            int i = k-'1';
+            if(i < (int)instrument_keyboard_.size()) {
+                playChord(instrument_keyboard_[i], btn_sustain_->value());
+                return 1;
+            }
+        }
+        if(k == '0') {
+            int i = 9;
+            if(i < (int)instrument_keyboard_.size()) {
+                playChord(instrument_keyboard_[i], btn_sustain_->value());
+                return 1;
+            }
+        }
+    }
+    if(event == FL_KEYUP){
+        int k = Fl::event_key();
+        if(k >= '1' && k <= '9'){
+            int i = k-'1';
+            if(i < (int)instrument_keyboard_.size()) {
+                releaseChord(instrument_keyboard_[i]);
+                return 1;
+            }
+        }
+        if(k == '0'){
+            int i = 9;
+            if(i < (int)instrument_keyboard_.size()) {
+                releaseChord(instrument_keyboard_[i]);
+                return 1;
+            }
+        }
     }
     return 0;
 }
@@ -600,37 +703,82 @@ void HarmoniaApp::cbSuggestCompletion(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->
 void HarmoniaApp::cbPsycho(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->updatePsychoAnalysis(); }
 void HarmoniaApp::cbFindPivots(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->updatePivotSearch(); }
 void HarmoniaApp::cbBrowserFunction(Fl_Widget* w, void* d) {
-    auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
-    int v=(int)(intptr_t)b->data(l); if(v>=1000) ((HarmoniaApp*)d)->highlightNodeForPC(v-1000);
+    auto* a=(HarmoniaApp*)d; auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
+    int v=(int)(intptr_t)b->data(l);
+    if(v>=1000) a->highlightNode(v-1000);
+    if(Fl::event_clicks() && v>=1000) { a->onTonalSpaceClick(v-1000, 4); Fl::event_clicks(0); }
 }
 void HarmoniaApp::cbBrowserPsycho(Fl_Widget* w, void* d) {
-    auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
-    int v=(int)(intptr_t)b->data(l); if(v>=1000) ((HarmoniaApp*)d)->highlightNodeForPC(v-1000);
+    auto* a=(HarmoniaApp*)d; auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
+    int v=(int)(intptr_t)b->data(l);
+    if(v>=1000) a->highlightNode(v-1000);
+    if(Fl::event_clicks() && v>=1000) { a->onTonalSpaceClick(v-1000, 4); Fl::event_clicks(0); }
 }
 void HarmoniaApp::cbBrowserResolutions(Fl_Widget* w, void* d) {
     auto* a=(HarmoniaApp*)d; auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
     int idx=(int)(intptr_t)b->data(l)-1; if(idx>=0 && idx<(int)a->last_resolutions_.size()){
-        const auto& rp = a->last_resolutions_[idx]; a->highlightNodeForPC(rp.target_root);
-        if(Fl::event_clicks()){ ChordKey ck; ck.name=rp.target_label; for(int pc:rp.target_pcs) ck.notes.push_back({pc, C4_HZ*std::pow(2.0, (double)pc/a->current_edo_), 4}); a->playChord(ck, true); }
+        const auto& rp = a->last_resolutions_[idx];
+        a->highlightNodes(rp.target_pcs);
+        if(Fl::event_clicks()){
+            ChordKey ck; ck.name=rp.target_label;
+            for(int pc:rp.target_pcs) ck.notes.push_back({pc, C4_HZ*std::pow(2.0, (double)pc/a->current_edo_), 4});
+            a->playChord(ck, true);
+            Fl::event_clicks(0);
+        }
     }
 }
 void HarmoniaApp::cbBrowserCompletion(Fl_Widget* w, void* d) {
-    auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
-    int v=(int)(intptr_t)b->data(l); if(v>=1000) ((HarmoniaApp*)d)->highlightNodeForPC(v-1000);
+    auto* a=(HarmoniaApp*)d; auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
+    int v=(int)(intptr_t)b->data(l);
+    if(v>=1000) a->highlightNode(v-1000);
+    if(Fl::event_clicks() && v>=1000) { a->onTonalSpaceClick(v-1000, 4); Fl::event_clicks(0); }
 }
 void HarmoniaApp::cbBrowserPivots(Fl_Widget* w, void* d) {
     auto* a=(HarmoniaApp*)d; auto* b=(Fl_Browser*)w; int l=b->value(); if(l<=0) return;
     int idx=(int)(intptr_t)b->data(l)-1; if(idx>=0 && idx<(int)a->last_pivot_res_.all_pivots.size()){
-        const auto& p = a->last_pivot_res_.all_pivots[idx]; a->highlightNodeForPC(p.root);
-        if(Fl::event_clicks()){ ChordKey ck; ck.name=p.label; for(int pc:p.pcs) ck.notes.push_back({pc, C4_HZ*std::pow(2.0, (double)pc/a->current_edo_), 4}); a->playChord(ck, true); }
+        const auto& p = a->last_pivot_res_.all_pivots[idx];
+        a->highlightNodes(p.pcs);
+        if(Fl::event_clicks()){
+            ChordKey ck; ck.name=p.label;
+            for(int pc:p.pcs) ck.notes.push_back({pc, C4_HZ*std::pow(2.0, (double)pc/a->current_edo_), 4});
+            a->playChord(ck, true);
+            Fl::event_clicks(0);
+        }
     }
 }
-void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) { if(Fl::event_clicks()){ auto* b=(Fl_Browser*)w; if(b->value()>0) ((HarmoniaApp*)d)->playChord(((HarmoniaApp*)d)->instrument_keyboard_[b->value()-1], true); } }
+void HarmoniaApp::cbBrowserKeys(Fl_Widget* w, void* d) {
+    auto* a = (HarmoniaApp*)d;
+    auto* b = (Fl_Browser*)w;
+    int l = b->value();
+    if (l > 0) {
+        const auto& ck = a->instrument_keyboard_[l-1];
+        std::vector<int> pcs;
+        for(const auto& n : ck.notes) pcs.push_back(n.pc);
+        a->highlightNodes(pcs);
+        if(Fl::event_clicks()){
+            a->playChord(ck, true);
+            Fl::event_clicks(0);
+        }
+    }
+}
 void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
-    auto* a = (HarmoniaApp*)d; auto voices = a->audio_->getVoiceSnapshot(); if(voices.empty()) return;
-    ChordKey ck; ck.name = "Chord " + std::to_string(a->instrument_keyboard_.size()+1);
-    for(auto& v:voices) if(v.note_on.load()){ ck.notes.push_back({v.pitch_class, v.frequency, v.octave}); }
-    a->instrument_keyboard_.push_back(ck); a->browser_keys_->add(ck.name.c_str());
+    auto* a = (HarmoniaApp*)d;
+    auto voices = a->audio_->getVoiceSnapshot();
+    std::vector<Voice> active;
+    for(auto& v : voices) if(v.note_on.load()) active.push_back(v);
+    if(active.empty()) return;
+
+    ChordKey ck;
+    ck.name = "Chord " + std::to_string(a->instrument_keyboard_.size()+1);
+    const char* input = fl_input("Enter chord name:", ck.name.c_str());
+    if (!input) return;
+    ck.name = input;
+
+    for(auto& v : active) {
+        ck.notes.push_back({v.pitch_class, v.frequency, v.octave});
+    }
+    a->instrument_keyboard_.push_back(ck);
+    a->browser_keys_->add(ck.name.c_str());
 }
 void HarmoniaApp::cbClearKeys(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->instrument_keyboard_.clear(); ((HarmoniaApp*)d)->browser_keys_->clear(); }
 
