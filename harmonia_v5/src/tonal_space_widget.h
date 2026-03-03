@@ -97,6 +97,7 @@ private:
     // ── private drawing
     void initGL();
     void buildSpace();
+    void updateNodeCoordinates();
     void drawBackground();
     void drawConnections();
     void drawNodes();

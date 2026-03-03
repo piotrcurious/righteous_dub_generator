@@ -18,8 +18,8 @@ bool TheoryBridge::start(const std::string& theory_dir) {
         close(to_py_[0]); close(to_py_[1]);
         close(from_py_[0]); close(from_py_[1]);
         std::string srv = theory_dir + "/server.py";
-        execl("/usr/bin/python3","python3",srv.c_str(),nullptr);
-        perror("execl"); _exit(1);
+        execlp("python3","python3",srv.c_str(),nullptr);
+        perror("execlp"); _exit(1);
     }
     close(to_py_[0]); close(from_py_[1]);
     to_py_[0] = from_py_[1] = -1;

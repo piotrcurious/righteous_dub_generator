@@ -3,10 +3,12 @@
 #include <FL/fl_draw.H>
 #include <FL/gl.h>
 #include <FL/glu.h>
-#include <FL/Fl_Gl_Window.H>
 #include <cmath>
-#include <cstring>
 #include <algorithm>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static const char* NOTE_NAMES_FLAT[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
@@ -35,7 +37,7 @@ void TonalSpaceWidget::buildSpace() {
             n.pitch_class = pc;
             n.octave = oct;
             // Angle: PC 0 is at PI/2 (top). progression is clockwise.
-            n.angle = (float)M_PI / 2.0f - ((float)pc / edo_) * 2.0f * (float)M_PI;
+            n.angle = (float)(M_PI / 2.0 - ((double)pc / edo_) * 2.0 * M_PI);
             n.radius = base_radius + (oct - 2) * ring_step;
             n.label = (oct == 4) ? pcLabel(pc, edo_) : "";
             n.cx = n.cy = 0.f;
@@ -57,12 +59,6 @@ void TonalSpaceWidget::setEDO(int edo) {
     if (edo_ == edo) return;
     edo_ = edo;
     buildSpace();
-    // Update screen coordinates immediately so node picking works before next draw
-    for (auto& n : nodes_) {
-        float wx = n.radius * cosf(n.angle + rotation_);
-        float wy = n.radius * sinf(n.angle + rotation_);
-        worldToScreen(wx, wy, n.cx, n.cy);
-    }
     redraw();
 }
 
@@ -70,56 +66,30 @@ void TonalSpaceWidget::setEDO(int edo) {
 //  Coordinate transforms
 // ────────────────────────────────────────────────────────────────────────────
 void TonalSpaceWidget::worldToScreen(float wx, float wy, float& sx, float& sy) {
-    float cx = w() * 0.5f, cy = h() * 0.5f;
-    sx = cx + (wx + pan_x_) * zoom_;
-    sy = cy - (wy + pan_y_) * zoom_;
+    float center_x = w() * 0.5f, center_y = h() * 0.5f;
+    sx = center_x + (wx + pan_x_) * zoom_;
+    sy = center_y - (wy + pan_y_) * zoom_;
 }
 
 void TonalSpaceWidget::screenToWorld(int sx, int sy, float& wx, float& wy) {
-    float cx = w() * 0.5f, cy = h() * 0.5f;
-    wx = (sx - cx) / zoom_ - pan_x_;
-    wy = -(sy - cy) / zoom_ - pan_y_;
+    float center_x = w() * 0.5f, center_y = h() * 0.5f;
+    wx = ((float)sx - center_x) / zoom_ - pan_x_;
+    wy = (center_y - (float)sy) / zoom_ - pan_y_;
 }
 
 TonalNode* TonalSpaceWidget::nodeAt(int sx, int sy) {
-    float wx, wy;
-    screenToWorld(sx, sy, wx, wy);
+    updateNodeCoordinates();
+    TonalNode* best = nullptr;
+    float best_dist = 25.0f; // pixel radius
 
-    float r = std::sqrt(wx*wx + wy*wy);
-    float theta = std::atan2(wy, wx);
-
-    // Normalize theta to match n.angle + rotation_
-    // n.angle = M_PI/2 - (pc/edo)*2PI
-    // So theta - rotation_ = M_PI/2 - (pc/edo)*2PI
-    // (pc/edo)*2PI = M_PI/2 - (theta - rotation_)
-
-    float target_angle = (float)M_PI / 2.0f - (theta - rotation_);
-    // Normalize to [0, 2PI)
-    while (target_angle < 0) target_angle += 2.0f * (float)M_PI;
-    while (target_angle >= 2.0f * (float)M_PI) target_angle -= 2.0f * (float)M_PI;
-
-    int pc = (int)std::round((target_angle / (2.0f * (float)M_PI)) * edo_) % edo_;
-
-    float base_radius = 80.0f;
-    float ring_step = 45.0f;
-    int oct = (int)std::round((r - base_radius) / ring_step) + 2;
-
-    if (oct < 2 || oct > 6) return nullptr;
-
-    int idx = (oct - 2) * edo_ + pc;
-    if (idx >= 0 && idx < (int)nodes_.size()) {
-        TonalNode& n = nodes_[idx];
-        // Ensure n.cx/n.cy are up to date for the distance check
-        float wx = n.radius * cosf(n.angle + rotation_);
-        float wy = n.radius * sinf(n.angle + rotation_);
-        worldToScreen(wx, wy, n.cx, n.cy);
-
-        float dx = (float)sx - n.cx;
-        float dy = (float)sy - n.cy;
-        if (std::sqrt(dx*dx + dy*dy) < 25.f * zoom_) return &n;
+    for (auto& n : nodes_) {
+        float dist = std::hypot((float)sx - n.cx, (float)sy - n.cy);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best = &n;
+        }
     }
-
-    return nullptr;
+    return best;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -131,7 +101,7 @@ void TonalSpaceWidget::drawFilledCircle(float cx,float cy,float r,
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(cx, cy);
     for (int i = 0; i <= 32; i++) {
-        float a2 = i * 2.f * M_PI / 32.f;
+        float a2 = i * 2.f * (float)M_PI / 32.f;
         glVertex2f(cx + r*cosf(a2), cy + r*sinf(a2));
     }
     glEnd();
@@ -143,7 +113,7 @@ void TonalSpaceWidget::drawRing(float cx,float cy,float r,float thick,
     glColor4f(red,g,b,a);
     glBegin(GL_LINE_LOOP);
     for (int i = 0; i < 48; i++) {
-        float ang = i * 2.f * M_PI / 48.f;
+        float ang = i * 2.f * (float)M_PI / 48.f;
         glVertex2f(cx + r*cosf(ang), cy + r*sinf(ang));
     }
     glEnd();
@@ -163,6 +133,14 @@ void TonalSpaceWidget::drawLine(float x1,float y1,float x2,float y2,
 // ────────────────────────────────────────────────────────────────────────────
 //  DRAW
 // ────────────────────────────────────────────────────────────────────────────
+void TonalSpaceWidget::updateNodeCoordinates() {
+    for (auto& n : nodes_) {
+        float wx = n.radius * std::cos(n.angle + rotation_);
+        float wy = n.radius * std::sin(n.angle + rotation_);
+        worldToScreen(wx, wy, n.cx, n.cy);
+    }
+}
+
 void TonalSpaceWidget::draw() {
     if (!valid()) {
         glViewport(0, 0, w(), h());
@@ -180,12 +158,7 @@ void TonalSpaceWidget::draw() {
     glClearColor(0.08f, 0.09f, 0.12f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Compute node screen coords
-    for (auto& n : nodes_) {
-        float wx = n.radius * cosf(n.angle + rotation_);
-        float wy = n.radius * sinf(n.angle + rotation_);
-        worldToScreen(wx, wy, n.cx, n.cy);
-    }
+    updateNodeCoordinates();
 
     drawConnections();
     drawRoughnessHeat();
@@ -280,11 +253,11 @@ void TonalSpaceWidget::drawLabels() {
 void TonalSpaceWidget::drawAbstractObject() {
     if (abs_obj_.confidence < 0.2f) return;
 
-    float cx = w() * 0.5f, cy = h() * 0.5f;
+    float center_x = w() * 0.5f, center_y = h() * 0.5f;
     static float pulse = 0.f; pulse += 0.04f;
     float r = 50.f + 10.f * sinf(pulse);
 
-    drawRing(cx, cy, r, 2.f, 1.f, 0.85f, 0.2f, abs_obj_.confidence);
+    drawRing(center_x, center_y, r, 2.f, 1.f, 0.85f, 0.2f, abs_obj_.confidence);
 }
 
 void TonalSpaceWidget::drawRoughnessHeat() {
@@ -299,7 +272,8 @@ void TonalSpaceWidget::drawRoughnessHeat() {
 
         auto findNode = [&](int pc, int oct) -> TonalNode* {
             if (oct < 2 || oct > 6) return nullptr;
-            int idx = (oct - 2) * edo_ + (pc % edo_);
+            int pc_norm = (pc % edo_ + edo_) % edo_;
+            int idx = (oct - 2) * edo_ + pc_norm;
             if (idx >= 0 && idx < (int)nodes_.size()) return &nodes_[idx];
             return nullptr;
         };
@@ -314,12 +288,16 @@ void TonalSpaceWidget::drawRoughnessHeat() {
 }
 
 int TonalSpaceWidget::handle(int event) {
+    // For an Fl_Gl_Window, events are local to the widget's origin.
+    int lx = Fl::event_x();
+    int ly = Fl::event_y();
+
     switch (event) {
     case FL_PUSH:
-        drag_x_ = Fl::event_x(); drag_y_ = Fl::event_y();
+        drag_x_ = lx; drag_y_ = ly;
         dragging_ = (Fl::event_button() == FL_MIDDLE_MOUSE);
         if (Fl::event_button() == FL_LEFT_MOUSE) {
-            TonalNode* n = nodeAt(drag_x_, drag_y_);
+            TonalNode* n = nodeAt(lx, ly);
             if (n && node_click_cb_) {
                 // Return PC and octave as surrogates
                 node_click_cb_(n->pitch_class, n->pitch_class, n->octave);
@@ -328,8 +306,9 @@ int TonalSpaceWidget::handle(int event) {
         return 1;
     case FL_DRAG:
         if (dragging_) {
-            rotation_ += (Fl::event_x() - drag_x_) * 0.01f;
-            drag_x_ = Fl::event_x(); drag_y_ = Fl::event_y();
+            // Dragging left-to-right (positive lx delta) rotates the wheel clockwise (decreasing angle).
+            rotation_ -= (lx - drag_x_) * 0.01f;
+            drag_x_ = lx; drag_y_ = ly;
             redraw();
         }
         return 1;

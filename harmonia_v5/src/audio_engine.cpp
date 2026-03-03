@@ -96,9 +96,9 @@ int AudioEngine::addVoice(int midi_note, TimbrePreset timbre) {
     Voice v;
     v.id = next_voice_id_++;
     v.edo = edo_.load();
-    v.name = noteName(midi_note % 12, midi_note/12-1, 12);
     v.setTimbre(timbre);
     v.setMidiNote(midi_note);
+    v.name = noteName(v.pitch_class, v.octave, v.edo);
     v.active.store(false);
     v.env_stage = Voice::EnvStage::IDLE;
     v.env_value = 0.f;
@@ -136,7 +136,11 @@ void AudioEngine::noteOff(int voice_id) {
 
 void AudioEngine::setVoiceFrequency(int voice_id, double hz) {
     std::lock_guard<std::mutex> lk(voices_mutex_);
-    for (auto& v : voices_) if (v.id == voice_id) { v.setFrequency(hz); break; }
+    for (auto& v : voices_) if (v.id == voice_id) {
+        v.setFrequency(hz);
+        v.name = noteName(v.pitch_class, v.octave, v.edo);
+        break;
+    }
 }
 
 void AudioEngine::setVoiceTonnetzCoords(int voice_id, int tx, int ty) {

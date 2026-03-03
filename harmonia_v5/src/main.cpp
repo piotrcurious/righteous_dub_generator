@@ -531,13 +531,14 @@ void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
 
     auto voices = audio_->getVoiceSnapshot(); int eid = -1;
     for (auto& v : voices) {
-        // Match by pitch class and octave ring in current EDO
-        if (v.pitch_class == pc && v.octave == oct) {
+        // Robust matching using absolute step distance in current EDO
+        double v_total_steps = std::round(std::log2(v.frequency / C4_HZ) * current_edo_);
+        if ((int)v_total_steps == (int)total_steps) {
             eid = v.id; break;
         }
-        // Fallback: match by frequency proximity (within 1 cent)
+        // Secondary fallback: frequency proximity
         double diff_cents = std::abs(1200.0 * std::log2(v.frequency / freq));
-        if (diff_cents < 1.0) { eid = v.id; break; }
+        if (diff_cents < 0.5) { eid = v.id; break; }
     }
 
     if (eid != -1) removeVoice(eid);
