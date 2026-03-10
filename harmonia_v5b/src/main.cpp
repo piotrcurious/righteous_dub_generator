@@ -571,8 +571,16 @@ void HarmoniaApp::updateFunctionalAnalysis() {
     for (auto& v : voices) if(v.active) pcs.push_back(v.pitch_class);
     if (pcs.empty()) { browser_function_->clear(); return; }
     theory_->queryAnalyzeChord(pcs, current_key_, current_edo_, [this](const FunctionalAnalysis& fa, const TonnetzTension& tt) {
-        browser_function_->clear(); char buf[256]; snprintf(buf,256,"@bFUNCTION: %s  [T=%.2f]", fa.function.c_str(), tt.tension);
-        browser_function_->add(buf); browser_function_->add(fa.function_reason.c_str());
+        browser_function_->clear(); char buf[256];
+        snprintf(buf, 256, "@b%s (%s)", fa.common_name.c_str(), fa.forte.c_str());
+        browser_function_->add(buf);
+        snprintf(buf,256,"@bFUNCTION: %s  [T=%.2f]", fa.function.c_str(), tt.tension);
+        browser_function_->add(buf);
+        browser_function_->add(fa.function_reason.c_str());
+        if (!fa.ic_description.empty()) {
+            snprintf(buf, 256, "Intervals: %s", fa.ic_description.c_str());
+            browser_function_->add(buf);
+        }
         for(auto& t:fa.tendency_tones){ snprintf(buf,256,"  %s: %s", t.name.c_str(), t.tendency.c_str()); browser_function_->add(buf); browser_function_->data(browser_function_->size(), (void*)(intptr_t)(t.pc+1000)); }
     });
 }
@@ -589,7 +597,18 @@ void HarmoniaApp::updateResolutionPaths() {
 void HarmoniaApp::updateCompletionSuggestions() {
     auto voices = audio_->getVoiceSnapshot(); std::vector<int> pcs; for(auto& v:voices) if(v.active) pcs.push_back(v.pitch_class);
     theory_->querySuggestCompletion(pcs, current_key_, current_edo_, [this](const std::vector<CompletionSuggestion>& ns){
-        browser_completion_->clear(); for(auto& s:ns){ char buf[128]; snprintf(buf,128,"@b%s (score %.2f)", s.name.c_str(), s.score); browser_completion_->add(buf); browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc+1000)); }
+        browser_completion_->clear();
+        for(auto& s : ns) {
+            char buf[256];
+            snprintf(buf, 256, "@b%s (score %.2f)", s.name.c_str(), s.score);
+            browser_completion_->add(buf);
+            browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc+1000));
+            for (const auto& reason : s.structural_reasons) {
+                snprintf(buf, 256, "  %s", reason.c_str());
+                browser_completion_->add(buf);
+                browser_completion_->data(browser_completion_->size(), (void*)(intptr_t)(s.pc+1000));
+            }
+        }
     });
 }
 void HarmoniaApp::updatePsychoAnalysis() {

@@ -15,8 +15,16 @@ static const char* NOTE_NAMES_FLAT[12] = {
 };
 
 static std::string pcLabel(int pc, int edo) {
-    if (edo == 12) return NOTE_NAMES_FLAT[pc % 12];
-    return std::to_string(pc);
+    pc = ((pc % edo) + edo) % edo;
+    if (edo == 12) return NOTE_NAMES_FLAT[pc];
+
+    double exact_semitones = pc * 12.0 / edo;
+    int idx12 = (int)std::round(exact_semitones) % 12;
+    int dev_cents = (int)std::round((exact_semitones - std::round(exact_semitones)) * 100);
+    std::string base = NOTE_NAMES_FLAT[idx12];
+    if (dev_cents == 0) return base;
+    std::string sign = (dev_cents > 0) ? "+" : "";
+    return base + sign + std::to_string(dev_cents) + "¢";
 }
 
 // ────────────────────────────────────────────────────────────────────────────

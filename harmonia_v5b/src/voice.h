@@ -231,15 +231,25 @@ struct Voice {
 
 // ────── note name utilities
 static const char* NOTE_NAMES[12] = {
+    "C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"
+};
+static const char* NOTE_NAMES_b[12] = {
     "C","D♭","D","E♭","E","F","G♭","G","A♭","A","B♭","B"
 };
 
-inline std::string noteName(int pitch_class, int octave, int edo = 12) {
+inline std::string noteName(int pc, int octave, int edo = 12, bool prefer_flat = false) {
+    pc = ((pc % edo) + edo) % edo;
     if (edo == 12) {
-        int idx = ((pitch_class % 12) + 12) % 12;
-        return std::string(NOTE_NAMES[idx]) + std::to_string(octave);
+        return std::string(prefer_flat ? NOTE_NAMES_b[pc] : NOTE_NAMES[pc]) + std::to_string(octave);
     }
-    return "[" + std::to_string(pitch_class) + "]" + std::to_string(octave);
+    // Map to nearest 12-tone semitone
+    double exact_semitones = pc * 12.0 / edo;
+    int idx12 = (int)std::round(exact_semitones) % 12;
+    int dev_cents = (int)std::round((exact_semitones - std::round(exact_semitones)) * 100);
+    std::string base = prefer_flat ? NOTE_NAMES_b[idx12] : NOTE_NAMES[idx12];
+    if (dev_cents == 0) return base + std::to_string(octave);
+    std::string sign = (dev_cents > 0) ? "+" : "";
+    return base + sign + std::to_string(dev_cents) + "¢" + std::to_string(octave);
 }
 
 inline double midiToHz(int midi_note) {

@@ -111,6 +111,9 @@ void TheoryBridge::queryAnalyzeChord(const std::vector<int>& pcs, int key, int e
         TonnetzTension tt;
         fa.function        = jStr(resp,"function");
         fa.function_reason = jStr(resp,"function_reason");
+        fa.forte           = jStr(resp,"forte");
+        fa.common_name     = jStr(resp,"common_name");
+        fa.ic_description  = jStr(resp,"ic_description");
         fa.tension_level   = jInt(resp,"tension_level");
         fa.has_tritone     = jBool(resp,"has_tritone");
         fa.in_diatonic     = jBool(resp,"in_diatonic");

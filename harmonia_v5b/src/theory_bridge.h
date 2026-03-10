@@ -118,6 +118,9 @@ struct TendencyTone {
 struct FunctionalAnalysis {
     std::string function;         // "TONIC", "DOMINANT", "SUBDOMINANT", etc.
     std::string function_reason;  // Full algebraic explanation
+    std::string forte;            // Allen Forte code, e.g. "3-11"
+    std::string common_name;      // e.g. "major triad"
+    std::string ic_description;   // e.g. "1xM3/m6, 1xm3/M6, 1xP4/P5"
     int         tension_level;    // 0-4
     bool        has_tritone;
     std::vector<int> tritone;     // [lt_pc, sd_pc]
