@@ -11,6 +11,7 @@ InstrumentWindow::InstrumentWindow(int W, int H, const char* L)
     : Fl_Double_Window(W, H, L) {
     color(COL_BG);
     buildUI();
+    end(); // Ensure window is closed
 
     // Default chords and patterns
     for(int i=0; i<10; i++) {
@@ -87,9 +88,14 @@ void InstrumentWindow::setChord(int slot, const InstrumentChord& chord) {
 }
 
 int InstrumentWindow::handle(int event) {
+    if (handlePerformanceKeys(event)) return 1;
+    return Fl_Double_Window::handle(event);
+}
+
+int InstrumentWindow::handlePerformanceKeys(int event) {
     if (event == FL_KEYDOWN) {
         if (Fl::focus() && (dynamic_cast<Fl_Input*>(Fl::focus()) || dynamic_cast<Fl_Spinner*>(Fl::focus())))
-            return Fl_Double_Window::handle(event);
+            return 0;
         int k = Fl::event_key();
         if (k >= '1' && k <= '9') {
             int idx = k - '1';
@@ -112,7 +118,7 @@ int InstrumentWindow::handle(int event) {
     }
     if (event == FL_KEYUP) {
         if (Fl::focus() && (dynamic_cast<Fl_Input*>(Fl::focus()) || dynamic_cast<Fl_Spinner*>(Fl::focus())))
-            return Fl_Double_Window::handle(event);
+            return 0;
         int k = Fl::event_key();
         if (k >= '1' && k <= '9') {
             int idx = k - '1';
@@ -124,7 +130,7 @@ int InstrumentWindow::handle(int event) {
             return 1;
         }
     }
-    return Fl_Double_Window::handle(event);
+    return 0;
 }
 
 void InstrumentWindow::cbChordBrowser(Fl_Widget* w, void* d) {

@@ -279,8 +279,14 @@ private:
 HarmoniaApp::HarmoniaApp() {
     audio_  = std::make_unique<AudioEngine>();
     theory_ = std::make_unique<TheoryBridge>();
-    instrument_win_ = std::make_unique<InstrumentWindow>(400, 500);
+
+    Fl_Group::current(0); // Ensure windows are top-level
     buildUI();
+
+    Fl_Group::current(0);
+    instrument_win_ = std::make_unique<InstrumentWindow>(400, 500);
+    instrument_win_->hide();
+
     setupCallbacks();
 }
 
@@ -465,6 +471,15 @@ void HarmoniaApp::setupCallbacks() {
         if (id >= 0) {
             audio_->setVoiceFrequency(id, f);
             audio_->noteOn(id);
+
+            // Auto-off for arpeggio notes
+            struct NoteOffTimer { AudioEngine* engine; int id; };
+            NoteOffTimer* timer = new NoteOffTimer{audio_.get(), id};
+            Fl::add_timeout(0.3, [](void* d) {
+                NoteOffTimer* t = (NoteOffTimer*)d;
+                t->engine->noteOff(t->id);
+                delete t;
+            }, timer);
         }
         updateTheory();
     });
