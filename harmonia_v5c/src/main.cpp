@@ -460,6 +460,7 @@ void HarmoniaApp::setupCallbacks() {
     instrument_win_->setPlayChordCallback([this](const InstrumentChord& c, bool s){ playChord(c, s); });
     instrument_win_->setReleaseChordCallback([this](const InstrumentChord& c){ releaseChord(c); });
     instrument_win_->setPlayNoteCallback([this](double f, int pc, int oct){
+        (void)pc; (void)oct;
         int id = audio_->addVoice(60);
         if (id >= 0) {
             audio_->setVoiceFrequency(id, f);

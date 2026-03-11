@@ -128,10 +128,12 @@ int InstrumentWindow::handle(int event) {
 }
 
 void InstrumentWindow::cbChordBrowser(Fl_Widget* w, void* d) {
+    (void)w; (void)d;
     // Maybe highlight or something
 }
 
 void InstrumentWindow::cbArpBrowser(Fl_Widget* w, void* d) {
+    (void)w;
     InstrumentWindow* self = (InstrumentWindow*)d;
     int idx = self->browser_arps_->value() - 1;
     if (idx >= 0 && idx < 10) {
@@ -146,6 +148,7 @@ void InstrumentWindow::cbArpBrowser(Fl_Widget* w, void* d) {
 }
 
 void InstrumentWindow::cbArpSteps(Fl_Widget* w, void* d) {
+    (void)w;
     InstrumentWindow* self = (InstrumentWindow*)d;
     int idx = self->current_arp_pattern_idx_;
     std::string s = self->input_arp_steps_->value();
