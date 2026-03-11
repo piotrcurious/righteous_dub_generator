@@ -281,11 +281,11 @@ HarmoniaApp::HarmoniaApp() {
     theory_ = std::make_unique<TheoryBridge>();
 
     Fl_Group::current(0); // Ensure windows are top-level
-    buildUI();
-
-    Fl_Group::current(0);
     instrument_win_ = std::make_unique<InstrumentWindow>(400, 500);
     instrument_win_->hide();
+
+    Fl_Group::current(0);
+    buildUI();
 
     setupCallbacks();
 }
@@ -306,6 +306,9 @@ void HarmoniaApp::run() {
     for (auto& s : strips_) audio_->noteOn(s->voice_id);
 
     updateTheory();
+
+    win_->show();
+
     Fl::add_idle(onIdle, this);
     Fl::run();
 }
@@ -437,7 +440,7 @@ void HarmoniaApp::buildUI() {
         box_object_label_->labelcolor(COL_ACCENT); box_object_label_->labelfont(FL_HELVETICA_BOLD); box_object_label_->labelsize(16);
     }
 
-    win_->end(); win_->show();
+    win_->end();
 }
 
 void HarmoniaApp::setupCallbacks() {
@@ -688,7 +691,7 @@ void HarmoniaApp::releaseChord(const InstrumentChord& chord) {
 }
 
 int HarmoniaApp::handle(int event) {
-    if (instrument_win_->handle(event)) return 1;
+    if (instrument_win_ && instrument_win_->handlePerformanceKeys(event)) return 1;
     return 0;
 }
 

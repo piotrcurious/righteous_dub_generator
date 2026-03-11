@@ -31,7 +31,7 @@ static std::string pcLabel(int pc, int edo) {
 TonalSpaceWidget::TonalSpaceWidget(int X,int Y,int W,int H,const char* l)
     : Fl_Gl_Window(X,Y,W,H,l)
 {
-    mode(FL_RGB | FL_DOUBLE | FL_DEPTH);
+    mode(FL_RGB | FL_DOUBLE);
     buildSpace();
 }
 
@@ -217,6 +217,7 @@ void TonalSpaceWidget::drawConnections() {
 
 void TonalSpaceWidget::drawNodes() {
     for (auto& n : nodes_) {
+        // Brighten background nodes for visibility
         bool has_voice = false;
         float vr=0, vg=0, vb=0;
         for (auto& v : voices_) {
@@ -249,8 +250,8 @@ void TonalSpaceWidget::drawNodes() {
             drawFilledCircle(n.cx, n.cy, 10.f, pr, pg, pb, 0.8f);
             drawRing(n.cx, n.cy, 12.f, 2.f, 1.0f, 1.0f, 1.0f, 0.9f);
         } else {
-            drawFilledCircle(n.cx, n.cy, 8.f, pr*.4f, pg*.4f, pb*.4f, 1.f);
-            drawRing(n.cx, n.cy, 8.f, 1.f, pr, pg, pb, 0.5f);
+            drawFilledCircle(n.cx, n.cy, 8.f, pr*.6f, pg*.6f, pb*.6f, 1.f);
+            drawRing(n.cx, n.cy, 8.f, 1.f, pr, pg, pb, 0.8f);
         }
     }
 }
@@ -323,9 +324,9 @@ void TonalSpaceWidget::drawRoughnessHeat() {
 }
 
 int TonalSpaceWidget::handle(int event) {
-    // For an Fl_Gl_Window, events are local to the widget's origin.
-    int lx = Fl::event_x();
-    int ly = Fl::event_y();
+    // Standard FLTK widget local coordinates
+    int lx = Fl::event_x() - x();
+    int ly = Fl::event_y() - y();
 
     switch (event) {
     case FL_PUSH:
