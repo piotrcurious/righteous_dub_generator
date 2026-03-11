@@ -46,6 +46,7 @@ public:
     void setPlayNoteCallback(std::function<void(double freq, int pc, int oct)> cb) { play_note_cb_ = cb; }
 
     int handle(int event) override;
+    int handlePerformanceKeys(int event);
 
     void updateChordList();
 
