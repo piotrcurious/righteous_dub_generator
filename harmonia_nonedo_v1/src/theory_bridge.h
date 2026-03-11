@@ -312,6 +312,14 @@ public:
     using LatticeTuningCb = std::function<void(const LatticeTuningInfo&)>;
     void queryLatticeTuning(const std::vector<int>& primes, int rank, LatticeTuningCb cb);
 
+    struct LatticeNote {
+        std::vector<int> coords;
+        double log2_f;
+        double freq_hz;
+    };
+    using LatticeNotesCb = std::function<void(const std::vector<LatticeNote>&)>;
+    void queryLatticeNotes(const std::vector<double>& generators, const std::vector<int>& bounds, LatticeNotesCb cb);
+
     // EDO analysis
     void queryEDOAnalysis(int edo, RawJsonCb cb);
 

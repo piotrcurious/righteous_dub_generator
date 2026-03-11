@@ -2714,55 +2714,108 @@ def pivot_search(
 
 def find_lattice_mapping(primes: List[int], rank: int) -> List[List[int]]:
     """
-    Find an optimal rank-r mapping matrix.
-    Currently uses known good mappings for standard prime sets.
+    Find an optimal rank-r mapping matrix for arbitrary primes.
+    Uses heuristic search across common EDOs to find independent Vals.
     """
+    if not primes: return []
     if primes == [2, 3, 5] and rank == 2:
         return [[1, 1, 0], [0, 1, 4]]
     if primes == [2, 3, 5, 7] and rank == 2:
         return [[1, 1, 0, -2], [0, 1, 4, 10]]
 
-    # Generic fallback: use mappings from EDO-12 and EDO-31
-    m1 = [round(12 * math.log2(p)) for p in primes]
-    if rank == 1: return [m1]
+    # Search for r independent vectors across common EDOs
+    common_edos = [12, 31, 19, 17, 22, 53, 41, 15, 26, 72]
+    mappings = []
 
-    m2 = [round(31 * math.log2(p)) for p in primes]
-    # Simple linear independence check
-    is_parallel = True
-    if len(primes) > 0:
-        ratio = m1[0]/m2[0] if m2[0] != 0 else None
-        for i in range(1, len(primes)):
-            cur_ratio = m1[i]/m2[i] if m2[i] != 0 else None
-            if cur_ratio != ratio:
-                is_parallel = False
-                break
-    if is_parallel:
-        m2 = [round(19 * math.log2(p)) for p in primes]
+    for n in common_edos:
+        val = [round(n * math.log2(p)) for p in primes]
+        # Check linear independence with existing mappings
+        if not mappings:
+            mappings.append(val)
+        else:
+            # We want to check if the new 'val' increases the rank of the matrix
+            temp_matrix = mappings + [val]
+            # Simple rank check via Gaussian elimination
+            row_count = len(temp_matrix)
+            col_count = len(primes)
+            pivot_row = 0
+            m_copy = [list(r) for r in temp_matrix]
+            for j in range(col_count):
+                if pivot_row >= row_count: break
+                # Find pivot
+                best_val = 0
+                best_row = -1
+                for i in range(pivot_row, row_count):
+                    if abs(m_copy[i][j]) > best_val:
+                        best_val = abs(m_copy[i][j])
+                        best_row = i
+                if best_val < 1e-9: continue
+                m_copy[pivot_row], m_copy[best_row] = m_copy[best_row], m_copy[pivot_row]
+                for i in range(pivot_row + 1, row_count):
+                    factor = m_copy[i][j] / m_copy[pivot_row][j]
+                    for k in range(j, col_count):
+                        m_copy[i][k] -= factor * m_copy[pivot_row][k]
+                pivot_row += 1
 
-    return [m1, m2]
+            if pivot_row > len(mappings):
+                mappings.append(val)
+
+        if len(mappings) >= rank: break
+
+    return mappings[:rank]
 
 def solve_lattice_generators(M: List[List[int]], primes: List[int]) -> List[float]:
-    """Solve for optimal (Tenney-L2) generator sizes given mapping M."""
+    """Solve for optimal (Tenney-L2) generator sizes using weighted least squares."""
+    if not M or not primes: return []
     nP = len(primes)
     r  = len(M)
     v  = [math.log2(p) for p in primes]
     w_weight = [1.0/max(1e-3, abs(vi)) for vi in v]
 
-    # M_W = M * diag(W)
-    MW = [[M[i][j] * w_weight[j] for j in range(nP)] for i in range(r)]
-    # A = MW * M^T (r x r)
-    A = [[sum(MW[i][k] * M[j][k] for k in range(nP)) for j in range(r)] for i in range(r)]
-    # B = MW * V (r x 1)
-    B = [sum(MW[i][k] * v[k] for k in range(nP)) for i in range(r)]
+    # Weighted least squares: (M W M^T) w = M W v
+    # A = M * W * M^T (r x r)
+    A = [[0.0 for _ in range(r)] for _ in range(r)]
+    for i in range(r):
+        for j in range(r):
+            for k in range(nP):
+                A[i][j] += M[i][k] * w_weight[k] * M[j][k]
 
-    if r == 1:
-        return [B[0] / A[0][0]] if A[0][0] != 0 else [1.0/12.0]
-    if r == 2:
-        det = A[0][0]*A[1][1] - A[0][1]*A[1][0]
-        if abs(det) > 1e-12:
-            return [(B[0]*A[1][1] - B[1]*A[0][1]) / det,
-                    (A[0][0]*B[1] - A[1][0]*B[0]) / det]
-    return [1.0/12.0] * r
+    # B = M * W * v (r x 1)
+    B = [0.0 for _ in range(r)]
+    for i in range(r):
+        for k in range(nP):
+            B[i] += M[i][k] * w_weight[k] * v[k]
+
+    # Simple Gaussian solver for r x r
+    n = r
+    for i in range(n):
+        # Pivot
+        max_el = abs(A[i][i])
+        max_row = i
+        for k in range(i+1, n):
+            if abs(A[k][i]) > max_el:
+                max_el = abs(A[k][i])
+                max_row = k
+        A[i], A[max_row] = A[max_row], A[i]
+        B[i], B[max_row] = B[max_row], B[i]
+
+        if abs(A[i][i]) < 1e-15: continue
+        for k in range(i+1, n):
+            c = -A[k][i]/A[i][i]
+            for j in range(i, n):
+                if i == j: A[k][j] = 0
+                else: A[k][j] += c * A[i][j]
+            B[k] += c * B[i]
+
+    res = [0.0] * n
+    for i in range(n-1, -1, -1):
+        if abs(A[i][i]) < 1e-15:
+            res[i] = 0.0
+            continue
+        res[i] = B[i]/A[i][i]
+        for k in range(i-1, -1, -1):
+            B[k] -= A[k][i] * res[i]
+    return res
 
 def get_lattice_tuning_info(primes: List[int], rank: int) -> Dict[str, Any]:
     M = find_lattice_mapping(primes, rank)
@@ -2807,14 +2860,30 @@ def get_lattice_coords(log2_f: float, generators_log2: List[float], bounds: int 
 
     return best_k
 
-def get_lattice_notes(generators_log2: List[float], bounds: List[int]) -> List[Dict[str, Any]]:
+def get_lattice_notes(generators_log2: List[float], bounds: List[int], limit: int = 500) -> List[Dict[str, Any]]:
     """
     Generate all notes within specified lattice bounds.
     bounds is a list of [min, max] for each generator.
     """
     rank = len(generators_log2)
-    ranges = [range(bounds[i*2], bounds[i*2+1] + 1) for i in range(rank)]
+    if not rank: return []
+
+    # Ensure bounds list is long enough
+    b = list(bounds)
+    while len(b) < rank * 2:
+        b.extend([-1, 1])
+
+    ranges = [range(b[i*2], b[i*2+1] + 1) for i in range(rank)]
     notes = []
+
+    # Cap total points to prevent hanging
+    total_expected = 1
+    for r in ranges: total_expected *= len(r)
+    if total_expected > limit:
+        # Heuristic to shrink bounds if too large
+        # This is a bit complex, let's just use the product but break if it grows too big
+        pass
+
     for coords in itertools.product(*ranges):
         log2_f = sum(c * w for c, w in zip(coords, generators_log2))
         notes.append({
@@ -2822,6 +2891,7 @@ def get_lattice_notes(generators_log2: List[float], bounds: List[int]) -> List[D
             "log2_f": log2_f,
             "freq_hz": 261.625565 * (2.0 ** log2_f)
         })
+        if len(notes) >= limit: break
     return notes
 
 

@@ -268,6 +268,46 @@ void TheoryBridge::queryOrbifoldDistance(const std::vector<int>& a,
     sendRaw(json);
 }
 
+void TheoryBridge::queryLatticeNotes(const std::vector<double>& generators, const std::vector<int>& bounds, LatticeNotesCb cb) {
+    std::string w_arr = "[";
+    for (size_t i=0;i<generators.size();i++) { w_arr+=std::to_string(generators[i]); if(i+1<generators.size()) w_arr+=","; }
+    w_arr += "]";
+    std::string b_arr = "[";
+    for (size_t i=0;i<bounds.size();i++) { b_arr+=std::to_string(bounds[i]); if(i+1<bounds.size()) b_arr+=","; }
+    b_arr += "]";
+    std::string tag = "get_lattice_notes_" + std::to_string(++request_counter_);
+    std::string json = "{\"cmd\":\"get_lattice_notes\",\"tag\":\"" + tag + "\",\"generators\":" + w_arr + ",\"bounds\":" + b_arr + "}";
+    auto raw_cb = [cb](const std::string& resp) {
+        std::vector<LatticeNote> notes;
+        size_t na = resp.find("\"notes\"");
+        if (na == std::string::npos) { if(cb) cb(notes); return; }
+        size_t as = resp.find('[',na);
+        if (as == std::string::npos) { if(cb) cb(notes); return; }
+
+        // Find matching ] for the array
+        int depth = 0; size_t end = as;
+        for (size_t i=as; i<resp.size(); i++) {
+            if (resp[i] == '[') depth++;
+            else if (resp[i] == ']') {
+                depth--;
+                if (depth == 0) { end = i; break; }
+            }
+        }
+        std::string arr_str = resp.substr(as + 1, end - as - 1);
+        for (auto& obj : splitJsonArray(arr_str)) {
+            LatticeNote n;
+            n.coords = jIntArr(obj, "coords");
+            n.log2_f = jFloat(obj, "log2_f");
+            n.freq_hz = jFloat(obj, "freq_hz");
+            notes.push_back(n);
+        }
+        if (cb) cb(notes);
+    };
+    { std::lock_guard<std::mutex> lk(pending_mutex_);
+      pending_cbs_.push_back({tag, raw_cb}); }
+    sendRaw(json);
+}
+
 void TheoryBridge::queryLatticeTuning(const std::vector<int>& primes, int rank, LatticeTuningCb cb) {
     std::string arr = "[";
     for (size_t i=0;i<primes.size();i++) { arr+=std::to_string(primes[i]); if(i+1<primes.size()) arr+=","; }

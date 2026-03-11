@@ -182,6 +182,14 @@ private:
     Fl_Group*    grp_modulation_{nullptr};
     Fl_Group*    grp_perception_{nullptr};
     Fl_Group*    grp_instrument_{nullptr};
+    Fl_Group*    grp_lattice_config_{nullptr};
+
+    // Lattice Settings
+    Fl_Input*    in_primes_{nullptr};
+    Fl_Spinner*  sp_rank_{nullptr};
+    Fl_Spinner*  sp_b_oct_lo_{nullptr}, *sp_b_oct_hi_{nullptr};
+    Fl_Spinner*  sp_b_fifth_lo_{nullptr}, *sp_b_fifth_hi_{nullptr};
+    Fl_Button*   btn_apply_lattice_{nullptr};
 
     // Right – structural theory panel
     Fl_Browser*  browser_function_{nullptr};
@@ -273,6 +281,7 @@ private:
     static void cbBrowserKeys(Fl_Widget* w, void* d);
     static void cbAddChordToKeys(Fl_Widget*, void* d);
     static void cbClearKeys(Fl_Widget*, void* d);
+    static void cbApplyLattice(Fl_Widget*, void* d);
 
     void playChord(const ChordKey& chord, bool sustain);
     void releaseChord(const ChordKey& chord);
@@ -436,6 +445,26 @@ void HarmoniaApp::buildUI() {
         btn_sustain_ = new Fl_Light_Button(px + pw/2 + 2, py, pw/2 - 2, 26, "Sustain");
         grp_instrument_->end();
 
+        // Tab 5: Lattice Config
+        grp_lattice_config_ = new Fl_Group(tabs_right_->x(), content_y + 25, THEORY_PANEL_W, content_h - 25, "Lattice");
+        py = content_y + 40;
+        new Fl_Box(px, py, pw, 16, "PRIMES (comma separated)"); py += 20;
+        in_primes_ = new Fl_Input(px, py, pw, 22); in_primes_->value("2,3,5"); py += 28;
+
+        new Fl_Box(px, py, 60, 22, "Rank:");
+        sp_rank_ = new Fl_Spinner(px + 65, py, 50, 22); sp_rank_->minimum(1); sp_rank_->maximum(4); sp_rank_->value(2); py += 30;
+
+        new Fl_Box(px, py, pw, 16, "BOUNDS (Octave lo/hi)"); py += 18;
+        sp_b_oct_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_oct_lo_->value(-2);
+        sp_b_oct_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_oct_hi_->value(2); py += 30;
+
+        new Fl_Box(px, py, pw, 16, "BOUNDS (Fifth lo/hi)"); py += 18;
+        sp_b_fifth_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_fifth_lo_->value(-5);
+        sp_b_fifth_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_fifth_hi_->value(6); py += 40;
+
+        btn_apply_lattice_ = new Fl_Button(px, py, pw, 30, "Recompute Temperament");
+        grp_lattice_config_->end();
+
         tabs_right_->end();
     }
 
@@ -458,6 +487,7 @@ void HarmoniaApp::setupCallbacks() {
     btn_find_pivots_->callback(cbFindPivots, this);
     btn_add_chord_->callback(cbAddChordToKeys, this);
     btn_clear_keys_->callback(cbClearKeys, this);
+    btn_apply_lattice_->callback(cbApplyLattice, this);
     btn_play_all_->callback(cbPlayAll, this);
     btn_stop_all_->callback(cbStopAll, this);
     sl_master_->callback(cbMasterVol, this);
@@ -724,10 +754,7 @@ void HarmoniaApp::cbMode(Fl_Widget* w, void* d) {
     if (m == 0) { // EDO
         a->tonal_space_->setEDO(a->current_edo_); a->audio_->setEDO(a->current_edo_);
     } else { // Lattice
-        a->theory_->queryLatticeTuning({2,3,5}, 2, [a](const LatticeTuningInfo& info){
-            a->audio_->setLatticeTuning(info.generators_log2);
-            a->tonal_space_->setLatticeTuning(info.generators_log2);
-        });
+        cbApplyLattice(nullptr, a);
     }
     a->updateTheory();
 }
@@ -833,5 +860,30 @@ void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
     a->browser_keys_->add(ck.name.c_str());
 }
 void HarmoniaApp::cbClearKeys(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->instrument_keyboard_.clear(); ((HarmoniaApp*)d)->browser_keys_->clear(); }
+
+void HarmoniaApp::cbApplyLattice(Fl_Widget*, void* d) {
+    auto* a = (HarmoniaApp*)d;
+    std::vector<int> primes;
+    std::string pstr = a->in_primes_->value();
+    std::stringstream ss(pstr);
+    std::string token;
+    while(std::getline(ss, token, ',')) {
+        try { primes.push_back(std::stoi(token)); } catch(...) {}
+    }
+    if (primes.empty()) primes = {2, 3, 5};
+    int rank = (int)a->sp_rank_->value();
+
+    a->theory_->queryLatticeTuning(primes, rank, [a, primes](const LatticeTuningInfo& info){
+        a->audio_->setLatticeTuning(info.generators_log2, primes);
+        a->tonal_space_->setLatticeTuning(info.generators_log2);
+
+        std::vector<int> bounds = {
+            (int)a->sp_b_oct_lo_->value(), (int)a->sp_b_oct_hi_->value(),
+            (int)a->sp_b_fifth_lo_->value(), (int)a->sp_b_fifth_hi_->value()
+        };
+        a->tonal_space_->setLatticeBounds(bounds);
+        a->ch_mode_->value(1);
+    });
+}
 
 int main() { Fl::lock(); HarmoniaApp app; app.run(); return 0; }

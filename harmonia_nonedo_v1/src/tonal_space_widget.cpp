@@ -60,25 +60,34 @@ void TonalSpaceWidget::buildSpace() {
                 nodes_.push_back(n);
             }
         }
-    } else if (mode_ == TuningMode::LATTICE && lattice_generators_.size() >= 2) {
-        // Rank 2 lattice visualization
-        double w1 = lattice_generators_[0]; // typically octave-like
-        double w2 = lattice_generators_[1]; // typically fifth-like
+    } else if (mode_ == TuningMode::LATTICE && !lattice_generators_.empty()) {
+        // Rank-r lattice visualization (projected to 2D using first two generators)
+        int rank = (int)lattice_generators_.size();
+        std::vector<int> b = lattice_bounds_;
+        while ((int)b.size() < rank * 2) {
+            if (b.size() < 2) b.push_back(-2), b.push_back(2); // Octaves
+            else if (b.size() < 4) b.push_back(-5), b.push_back(6); // Fifths
+            else b.push_back(0), b.push_back(0);
+        }
+
+        double w1 = lattice_generators_[0];
+        double w2 = (rank >= 2) ? lattice_generators_[1] : 0.0;
 
         float cell_w = 60.0f;
         float cell_h = 60.0f;
 
-        for (int k1 = -2; k1 <= 2; k1++) {
-            for (int k2 = -5; k2 <= 6; k2++) {
+        // We only visualize 2D slice for now if rank > 2
+        for (int k1 = b[0]; k1 <= b[1]; k1++) {
+            for (int k2 = b[2]; k2 <= b[3]; k2++) {
                 TonalNode n;
-                n.rank = 2;
+                n.rank = rank;
                 n.lattice_coords[0] = k1;
                 n.lattice_coords[1] = k2;
+                for(int i=2; i<rank && i<4; i++) n.lattice_coords[i] = 0; // Simple slice
 
                 double log2_f = k1 * w1 + k2 * w2;
                 n.freq = (float)(C4_HZ * std::pow(2.0, log2_f));
 
-                // Map to nearest 12-EDO for labeling
                 double total_steps = std::round(log2_f * 12.0);
                 n.pitch_class = (int)std::fmod(total_steps, 12.0);
                 if (n.pitch_class < 0) n.pitch_class += 12;
@@ -87,13 +96,11 @@ void TonalSpaceWidget::buildSpace() {
                 n.wx = k2 * cell_w;
                 n.wy = k1 * cell_h;
 
-                // Construct label: e.g. "C4" or "[+2]"
                 n.label = pcLabel(n.pitch_class, 12);
                 if (k2 != 0) {
                    char buf[16]; snprintf(buf, 16, "%+d", k2);
                    n.label += buf;
                 }
-
                 nodes_.push_back(n);
             }
         }
@@ -114,6 +121,14 @@ void TonalSpaceWidget::setEDO(int edo) {
     edo_ = edo;
     buildSpace();
     redraw();
+}
+
+void TonalSpaceWidget::setLatticeBounds(const std::vector<int>& bounds) {
+    lattice_bounds_ = bounds;
+    if (mode_ == TuningMode::LATTICE) {
+        buildSpace();
+        redraw();
+    }
 }
 
 void TonalSpaceWidget::setLatticeTuning(const std::vector<double>& generators) {

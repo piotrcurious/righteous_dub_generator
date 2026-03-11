@@ -83,8 +83,9 @@ public:
     void setEDO(int edo);
     int  getEDO() const { return edo_.load(); }
 
-    void setLatticeTuning(const std::vector<double>& generators);
+    void setLatticeTuning(const std::vector<double>& generators, const std::vector<int>& primes);
     std::vector<double> getLatticeGenerators() const;
+    std::vector<int> getLatticePrimes() const;
     TuningMode getTuningMode() const { return mode_.load(); }
 
     // ── master
@@ -117,6 +118,7 @@ private:
     std::atomic<int>   edo_{12};
     std::atomic<TuningMode> mode_{TuningMode::EDO};
     std::vector<double> lattice_generators_;
+    std::vector<int> lattice_primes_;
 
     // ── shared results (written by audio thread, read by UI)
     mutable std::mutex results_mutex_;

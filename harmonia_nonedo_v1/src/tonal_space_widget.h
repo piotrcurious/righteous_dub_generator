@@ -45,6 +45,7 @@ public:
     void setRoughnessRecords(const std::vector<RoughnessRecord>& rr);
     void setEDO(int edo);
     void setLatticeTuning(const std::vector<double>& generators);
+    void setLatticeBounds(const std::vector<int>& bounds);
 
     // ── callback: user clicked a node → suggested note
     using NodeClickCb = std::function<void(int pc, int oct, double freq)>;
@@ -83,6 +84,7 @@ private:
     TuningMode                mode_{TuningMode::EDO};
     int                       edo_{12};
     std::vector<double>       lattice_generators_;
+    std::vector<int>          lattice_bounds_;
     std::vector<Voice>        voices_;
     AbstractObject            abs_obj_;
     std::vector<RoughnessRecord> roughness_;

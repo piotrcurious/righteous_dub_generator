@@ -210,8 +210,9 @@ void AudioEngine::setEDO(int edo) {
     }
 }
 
-void AudioEngine::setLatticeTuning(const std::vector<double>& generators) {
+void AudioEngine::setLatticeTuning(const std::vector<double>& generators, const std::vector<int>& primes) {
     lattice_generators_ = generators;
+    lattice_primes_ = primes;
     mode_.store(TuningMode::LATTICE);
     std::lock_guard<std::mutex> lk(voices_mutex_);
     for (auto& v : voices_) {
@@ -228,6 +229,11 @@ void AudioEngine::setLatticeTuning(const std::vector<double>& generators) {
 std::vector<double> AudioEngine::getLatticeGenerators() const {
     std::lock_guard<std::mutex> lk(voices_mutex_);
     return lattice_generators_;
+}
+
+std::vector<int> AudioEngine::getLatticePrimes() const {
+    std::lock_guard<std::mutex> lk(voices_mutex_);
+    return lattice_primes_;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
