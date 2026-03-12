@@ -280,12 +280,12 @@ HarmoniaApp::HarmoniaApp() {
     audio_  = std::make_unique<AudioEngine>();
     theory_ = std::make_unique<TheoryBridge>();
 
-    Fl_Group::current(0); // Ensure windows are top-level
+    Fl_Group::current(0);
     instrument_win_ = std::make_unique<InstrumentWindow>(400, 500);
     instrument_win_->hide();
 
     Fl_Group::current(0);
-    buildUI(); // creates win_
+    buildUI();
 
     setupCallbacks();
     if (win_) win_->show();
@@ -543,7 +543,7 @@ void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
     // Standardize frequency calculation:
     // f = C4 * 2^((pc + (oct-4)*edo) / edo)
     double total_steps = (double)pc + (double)(oct - 4) * current_edo_;
-    double freq = C4_HZ * std::pow(2.0, total_steps / current_edo_);
+    double freq = C4_HZ * std::pow(2.0, (double)total_steps / current_edo_);
 
     auto voices = audio_->getVoiceSnapshot(); int eid = -1;
     for (auto& v : voices) {
@@ -554,7 +554,7 @@ void HarmoniaApp::onTonalSpaceClick(int pc, int oct) {
         }
         // Secondary fallback: frequency proximity
         double diff_cents = std::abs(1200.0 * std::log2(v.frequency / freq));
-        if (diff_cents < 0.5) { eid = v.id; break; }
+        if (diff_cents < 10.0) { eid = v.id; break; }
     }
 
     if (eid != -1) removeVoice(eid);

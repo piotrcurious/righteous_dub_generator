@@ -324,7 +324,8 @@ void TonalSpaceWidget::drawRoughnessHeat() {
 }
 
 int TonalSpaceWidget::handle(int event) {
-    // For an Fl_Gl_Window inside a layout, convert global event coords to widget-local
+    // For hit testing, convert window coordinates to widget-local coordinates.
+    // TonalSpaceWidget is offset within the main layout.
     int lx = Fl::event_x() - x();
     int ly = Fl::event_y() - y();
 
