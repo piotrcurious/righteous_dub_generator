@@ -61,48 +61,58 @@ void TonalSpaceWidget::buildSpace() {
             }
         }
     } else if (mode_ == TuningMode::LATTICE && !lattice_generators_.empty()) {
-        // Rank-r lattice visualization (projected to 2D using first two generators)
         int rank = (int)lattice_generators_.size();
         std::vector<int> b = lattice_bounds_;
-        while ((int)b.size() < rank * 2) {
-            if (b.size() < 2) b.push_back(-2), b.push_back(2); // Octaves
-            else if (b.size() < 4) b.push_back(-5), b.push_back(6); // Fifths
-            else b.push_back(0), b.push_back(0);
-        }
-
-        double w1 = lattice_generators_[0];
-        double w2 = (rank >= 2) ? lattice_generators_[1] : 0.0;
+        while ((int)b.size() < 8) b.push_back(0);
 
         float cell_w = 60.0f;
         float cell_h = 60.0f;
 
-        // We only visualize 2D slice for now if rank > 2
+        // Iterate through up to 4 dimensions
         for (int k1 = b[0]; k1 <= b[1]; k1++) {
-            for (int k2 = b[2]; k2 <= b[3]; k2++) {
-                TonalNode n;
-                n.rank = rank;
-                n.lattice_coords[0] = k1;
-                n.lattice_coords[1] = k2;
-                for(int i=2; i<rank && i<4; i++) n.lattice_coords[i] = 0; // Simple slice
+        for (int k2 = b[2]; k2 <= b[3]; k2++) {
+        for (int k3 = b[4]; k3 <= b[5]; k3++) {
+        for (int k4 = b[6]; k4 <= b[7]; k4++) {
+            TonalNode n;
+            n.rank = rank;
+            n.lattice_coords[0] = k1; n.lattice_coords[1] = k2;
+            n.lattice_coords[2] = k3; n.lattice_coords[3] = k4;
 
-                double log2_f = k1 * w1 + k2 * w2;
-                n.freq = (float)(C4_HZ * std::pow(2.0, log2_f));
+            double log2_f = k1 * lattice_generators_[0];
+            if (rank >= 2) log2_f += k2 * lattice_generators_[1];
+            if (rank >= 3) log2_f += k3 * lattice_generators_[2];
+            if (rank >= 4) log2_f += k4 * lattice_generators_[3];
 
-                double total_steps = std::round(log2_f * 12.0);
-                n.pitch_class = (int)std::fmod(total_steps, 12.0);
-                if (n.pitch_class < 0) n.pitch_class += 12;
-                n.octave = 4 + (int)std::floor(total_steps / 12.0);
+            n.freq = (float)(C4_HZ * std::pow(2.0, log2_f));
 
-                n.wx = k2 * cell_w;
-                n.wy = k1 * cell_h;
+            double total_steps = std::round(log2_f * 12.0);
+            n.pitch_class = (int)std::fmod(total_steps, 12.0);
+            if (n.pitch_class < 0) n.pitch_class += 12;
+            n.octave = 4 + (int)std::floor(total_steps / 12.0);
 
-                n.label = pcLabel(n.pitch_class, 12);
-                if (k2 != 0) {
-                   char buf[16]; snprintf(buf, 16, "%+d", k2);
-                   n.label += buf;
-                }
-                nodes_.push_back(n);
+            // Multi-dimensional projection
+            // Base X, Y from k2, k1
+            n.wx = k2 * cell_w;
+            n.wy = k1 * cell_h;
+            // Isometric-like projection for 3rd and 4th dimensions
+            if (rank >= 3) {
+                n.wx += k3 * cell_w * 0.4f;
+                n.wy += k3 * cell_h * 0.4f;
             }
+            if (rank >= 4) {
+                n.wx += k4 * cell_w * 0.7f;
+                n.wy -= k4 * cell_h * 0.2f;
+            }
+
+            n.label = pcLabel(n.pitch_class, 12);
+            if (rank >= 2 && k2 != 0) {
+               char buf[16]; snprintf(buf, 16, "%+d", k2);
+               n.label += buf;
+            }
+            nodes_.push_back(n);
+        }
+        }
+        }
         }
     }
 }
@@ -120,6 +130,11 @@ void TonalSpaceWidget::setEDO(int edo) {
     mode_ = TuningMode::EDO;
     edo_ = edo;
     buildSpace();
+    redraw();
+}
+
+void TonalSpaceWidget::setRotation(float angle_deg) {
+    rotation_ = angle_deg * (float)M_PI / 180.0f;
     redraw();
 }
 
@@ -289,11 +304,18 @@ void TonalSpaceWidget::drawConnections() {
         // Lattice mode connections
         for (size_t i = 0; i < nodes_.size(); i++) {
             for (size_t j = i + 1; j < nodes_.size(); j++) {
-                int dx = std::abs(nodes_[i].lattice_coords[0] - nodes_[j].lattice_coords[0]);
-                int dy = std::abs(nodes_[i].lattice_coords[1] - nodes_[j].lattice_coords[1]);
-                if ((dx == 1 && dy == 0) || (dx == 0 && dy == 1)) {
+                int dist = 0;
+                for (int k = 0; k < 4; k++) dist += std::abs(nodes_[i].lattice_coords[k] - nodes_[j].lattice_coords[k]);
+
+                if (dist == 1) {
+                    float r=0.2f, g=0.25f, b=0.35f;
+                    // Color code connections by dimension
+                    if (std::abs(nodes_[i].lattice_coords[0] - nodes_[j].lattice_coords[0]) == 1) { r=0.4f; }
+                    else if (std::abs(nodes_[i].lattice_coords[1] - nodes_[j].lattice_coords[1]) == 1) { g=0.4f; }
+                    else if (std::abs(nodes_[i].lattice_coords[2] - nodes_[j].lattice_coords[2]) == 1) { b=0.5f; }
+
                     drawLine(nodes_[i].cx, nodes_[i].cy, nodes_[j].cx, nodes_[j].cy,
-                             0.2f, 0.25f, 0.35f, 0.8f);
+                             r, g, b, 0.6f);
                 }
             }
         }

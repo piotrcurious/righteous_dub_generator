@@ -46,6 +46,7 @@ public:
     void setEDO(int edo);
     void setLatticeTuning(const std::vector<double>& generators);
     void setLatticeBounds(const std::vector<int>& bounds);
+    void setRotation(float angle_deg);
 
     // ── callback: user clicked a node → suggested note
     using NodeClickCb = std::function<void(int pc, int oct, double freq)>;

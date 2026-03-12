@@ -189,6 +189,9 @@ private:
     Fl_Spinner*  sp_rank_{nullptr};
     Fl_Spinner*  sp_b_oct_lo_{nullptr}, *sp_b_oct_hi_{nullptr};
     Fl_Spinner*  sp_b_fifth_lo_{nullptr}, *sp_b_fifth_hi_{nullptr};
+    Fl_Spinner*  sp_b_3rd_lo_{nullptr}, *sp_b_3rd_hi_{nullptr};
+    Fl_Spinner*  sp_b_4th_lo_{nullptr}, *sp_b_4th_hi_{nullptr};
+    Fl_Value_Slider* sl_view_angle_{nullptr};
     Fl_Button*   btn_apply_lattice_{nullptr};
 
     // Right – structural theory panel
@@ -282,6 +285,7 @@ private:
     static void cbAddChordToKeys(Fl_Widget*, void* d);
     static void cbClearKeys(Fl_Widget*, void* d);
     static void cbApplyLattice(Fl_Widget*, void* d);
+    static void cbViewAngle(Fl_Widget*, void* d);
 
     void playChord(const ChordKey& chord, bool sustain);
     void releaseChord(const ChordKey& chord);
@@ -455,12 +459,24 @@ void HarmoniaApp::buildUI() {
         sp_rank_ = new Fl_Spinner(px + 65, py, 50, 22); sp_rank_->minimum(1); sp_rank_->maximum(4); sp_rank_->value(2); py += 30;
 
         new Fl_Box(px, py, pw, 16, "BOUNDS (Octave lo/hi)"); py += 18;
-        sp_b_oct_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_oct_lo_->value(-2);
-        sp_b_oct_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_oct_hi_->value(2); py += 30;
+        sp_b_oct_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_oct_lo_->minimum(-20); sp_b_oct_lo_->maximum(20); sp_b_oct_lo_->value(-2);
+        sp_b_oct_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_oct_hi_->minimum(-20); sp_b_oct_hi_->maximum(20); sp_b_oct_hi_->value(2); py += 30;
 
         new Fl_Box(px, py, pw, 16, "BOUNDS (Fifth lo/hi)"); py += 18;
-        sp_b_fifth_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_fifth_lo_->value(-5);
-        sp_b_fifth_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_fifth_hi_->value(6); py += 40;
+        sp_b_fifth_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_fifth_lo_->minimum(-20); sp_b_fifth_lo_->maximum(20); sp_b_fifth_lo_->value(-5);
+        sp_b_fifth_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_fifth_hi_->minimum(-20); sp_b_fifth_hi_->maximum(20); sp_b_fifth_hi_->value(6); py += 30;
+
+        new Fl_Box(px, py, pw, 16, "BOUNDS (G3 lo/hi)"); py += 18;
+        sp_b_3rd_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_3rd_lo_->minimum(-20); sp_b_3rd_lo_->maximum(20); sp_b_3rd_lo_->value(-1);
+        sp_b_3rd_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_3rd_hi_->minimum(-20); sp_b_3rd_hi_->maximum(20); sp_b_3rd_hi_->value(1); py += 30;
+
+        new Fl_Box(px, py, pw, 16, "BOUNDS (G4 lo/hi)"); py += 18;
+        sp_b_4th_lo_ = new Fl_Spinner(px, py, 60, 22); sp_b_4th_lo_->minimum(-20); sp_b_4th_lo_->maximum(20); sp_b_4th_lo_->value(0);
+        sp_b_4th_hi_ = new Fl_Spinner(px+70, py, 60, 22); sp_b_4th_hi_->minimum(-20); sp_b_4th_hi_->maximum(20); sp_b_4th_hi_->value(0); py += 40;
+
+        new Fl_Box(px, py, 100, 22, "View Angle:");
+        sl_view_angle_ = new Fl_Value_Slider(px + 105, py, pw - 105, 20);
+        sl_view_angle_->type(FL_HORIZONTAL); sl_view_angle_->range(0, 360); sl_view_angle_->value(0); py += 30;
 
         btn_apply_lattice_ = new Fl_Button(px, py, pw, 30, "Recompute Temperament");
         grp_lattice_config_->end();
@@ -488,6 +504,7 @@ void HarmoniaApp::setupCallbacks() {
     btn_add_chord_->callback(cbAddChordToKeys, this);
     btn_clear_keys_->callback(cbClearKeys, this);
     btn_apply_lattice_->callback(cbApplyLattice, this);
+    sl_view_angle_->callback(cbViewAngle, this);
     btn_play_all_->callback(cbPlayAll, this);
     btn_stop_all_->callback(cbStopAll, this);
     sl_master_->callback(cbMasterVol, this);
@@ -861,6 +878,11 @@ void HarmoniaApp::cbAddChordToKeys(Fl_Widget*, void* d) {
 }
 void HarmoniaApp::cbClearKeys(Fl_Widget*, void* d) { ((HarmoniaApp*)d)->instrument_keyboard_.clear(); ((HarmoniaApp*)d)->browser_keys_->clear(); }
 
+void HarmoniaApp::cbViewAngle(Fl_Widget* w, void* d) {
+    auto* a = (HarmoniaApp*)d;
+    a->tonal_space_->setRotation((float)((Fl_Value_Slider*)w)->value());
+}
+
 void HarmoniaApp::cbApplyLattice(Fl_Widget*, void* d) {
     auto* a = (HarmoniaApp*)d;
     std::vector<int> primes;
@@ -879,7 +901,9 @@ void HarmoniaApp::cbApplyLattice(Fl_Widget*, void* d) {
 
         std::vector<int> bounds = {
             (int)a->sp_b_oct_lo_->value(), (int)a->sp_b_oct_hi_->value(),
-            (int)a->sp_b_fifth_lo_->value(), (int)a->sp_b_fifth_hi_->value()
+            (int)a->sp_b_fifth_lo_->value(), (int)a->sp_b_fifth_hi_->value(),
+            (int)a->sp_b_3rd_lo_->value(), (int)a->sp_b_3rd_hi_->value(),
+            (int)a->sp_b_4th_lo_->value(), (int)a->sp_b_4th_hi_->value()
         };
         a->tonal_space_->setLatticeBounds(bounds);
         a->ch_mode_->value(1);

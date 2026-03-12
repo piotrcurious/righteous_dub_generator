@@ -2860,7 +2860,7 @@ def get_lattice_coords(log2_f: float, generators_log2: List[float], bounds: int 
 
     return best_k
 
-def get_lattice_notes(generators_log2: List[float], bounds: List[int], limit: int = 500) -> List[Dict[str, Any]]:
+def get_lattice_notes(generators_log2: List[float], bounds: List[int], limit: int = 1000) -> List[Dict[str, Any]]:
     """
     Generate all notes within specified lattice bounds.
     bounds is a list of [min, max] for each generator.
@@ -2871,18 +2871,12 @@ def get_lattice_notes(generators_log2: List[float], bounds: List[int], limit: in
     # Ensure bounds list is long enough
     b = list(bounds)
     while len(b) < rank * 2:
-        b.extend([-1, 1])
+        if len(b) < 2: b.extend([-2, 2])
+        elif len(b) < 4: b.extend([-5, 6])
+        else: b.extend([-1, 1])
 
     ranges = [range(b[i*2], b[i*2+1] + 1) for i in range(rank)]
     notes = []
-
-    # Cap total points to prevent hanging
-    total_expected = 1
-    for r in ranges: total_expected *= len(r)
-    if total_expected > limit:
-        # Heuristic to shrink bounds if too large
-        # This is a bit complex, let's just use the product but break if it grows too big
-        pass
 
     for coords in itertools.product(*ranges):
         log2_f = sum(c * w for c, w in zip(coords, generators_log2))
