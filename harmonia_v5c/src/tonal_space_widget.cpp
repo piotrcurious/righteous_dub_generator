@@ -250,8 +250,8 @@ void TonalSpaceWidget::drawNodes() {
             drawFilledCircle(n.cx, n.cy, 10.f, pr, pg, pb, 0.8f);
             drawRing(n.cx, n.cy, 12.f, 2.f, 1.0f, 1.0f, 1.0f, 0.9f);
         } else {
-            drawFilledCircle(n.cx, n.cy, 8.f, pr*.6f, pg*.6f, pb*.6f, 1.f);
-            drawRing(n.cx, n.cy, 8.f, 1.f, pr, pg, pb, 0.8f);
+            drawFilledCircle(n.cx, n.cy, 8.f, pr*.45f, pg*.45f, pb*.45f, 1.f);
+            drawRing(n.cx, n.cy, 8.f, 1.f, pr, pg, pb, 0.65f);
         }
     }
 }
@@ -324,7 +324,7 @@ void TonalSpaceWidget::drawRoughnessHeat() {
 }
 
 int TonalSpaceWidget::handle(int event) {
-    // Standard FLTK widget local coordinates
+    // For an Fl_Gl_Window inside a layout, convert global event coords to widget-local
     int lx = Fl::event_x() - x();
     int ly = Fl::event_y() - y();
 

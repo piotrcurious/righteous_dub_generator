@@ -285,9 +285,10 @@ HarmoniaApp::HarmoniaApp() {
     instrument_win_->hide();
 
     Fl_Group::current(0);
-    buildUI();
+    buildUI(); // creates win_
 
     setupCallbacks();
+    if (win_) win_->show();
 }
 
 HarmoniaApp::~HarmoniaApp() {
@@ -306,9 +307,6 @@ void HarmoniaApp::run() {
     for (auto& s : strips_) audio_->noteOn(s->voice_id);
 
     updateTheory();
-
-    win_->show();
-
     Fl::add_idle(onIdle, this);
     Fl::run();
 }
@@ -475,10 +473,10 @@ void HarmoniaApp::setupCallbacks() {
             audio_->setVoiceFrequency(id, f);
             audio_->noteOn(id);
 
-            // Auto-off for arpeggio notes
+            // Auto-off for arpeggio notes (duration 0.35s)
             struct NoteOffTimer { AudioEngine* engine; int id; };
             NoteOffTimer* timer = new NoteOffTimer{audio_.get(), id};
-            Fl::add_timeout(0.3, [](void* d) {
+            Fl::add_timeout(0.35, [](void* d) {
                 NoteOffTimer* t = (NoteOffTimer*)d;
                 t->engine->noteOff(t->id);
                 delete t;

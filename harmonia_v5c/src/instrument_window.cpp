@@ -11,7 +11,7 @@ InstrumentWindow::InstrumentWindow(int W, int H, const char* L)
     : Fl_Double_Window(W, H, L) {
     color(COL_BG);
     buildUI();
-    end(); // Ensure window is closed
+    end();
 
     // Default chords and patterns
     for(int i=0; i<10; i++) {
